@@ -1,54 +1,47 @@
-// src/app/api/ai/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import crypto from 'crypto';
-export const runtime = 'nodejs';
 
-const URL    = process.env.N8N_WEBHOOK_URL || '';
-const SECRET = process.env.N8N_SIGNING_SECRET || '';
-const VERIFY = (process.env.N8N_VERIFY_SIG ?? 'true').toLowerCase() !== 'false'; // ตั้ง N8N_VERIFY_SIG=false เพื่อลองข้าม HMAC
+const N8N_BASE = process.env.N8N_BASE!; // e.g. https://nexroom.onrender.com
+const N8N_SECRET = process.env.N8N_SIGNING_SECRET!;
 
-function stableStringify(obj: any) {
-  const keys = new Set<string>(); JSON.stringify(obj, (k, v) => (keys.add(k), v));
-  return JSON.stringify(obj, Array.from(keys).sort());
-}
-function sign(body: string) {
-  return crypto.createHmac('sha256', SECRET).update(body).digest('hex');
-}
-
-export async function GET() {
-  return NextResponse.json({ ok: true, ping: 'ai-route-alive', url: URL, verify: VERIFY });
-}
-
-export async function POST(req: NextRequest) {
-  if (!URL) return NextResponse.json({ ok:false, error:'missing_N8N_WEBHOOK_URL' }, { status: 500 });
+export async function POST(req: Request) {
   try {
-    const payload = await req.json().catch(() => ({}));
-    const body = stableStringify(payload);
-    const headers: Record<string, string> = { 'content-type': 'application/json', 'x-nexroom-client': 'dashboard' };
-    if (VERIFY) headers['x-nexroom-signature'] = sign(body);
+    const jar = await cookies();
+    const sid = jar.get('nxr_session')?.value || '';
+    if (!sid) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
 
-    const r = await fetch(URL, { method: 'POST', headers, body, cache: 'no-store', redirect: 'follow' });
+    const body = await req.json();
+    // ผูก context เพิ่มจากเซสชันฝั่งคุณได้ เช่น userId/dormId จาก DB ถ้าต้องการ
+    const payload = {
+      message: body.message,
+      context: body.context, // ใช้อันเดิมของคุณ
+    };
 
-    const ct = r.headers.get('content-type') || '';
-    const raw = await r.text();
+    // stable stringify
+    const sorted = (obj: any) => {
+      const all = new Set<string>(); JSON.stringify(obj, (k,v)=>(all.add(k),v));
+      return JSON.stringify(obj, Array.from(all).sort());
+    };
+    const bodyStr = sorted(payload);
+    const sig = crypto.createHmac('sha256', N8N_SECRET).update(bodyStr).digest('hex');
 
-    // ถ้า content-type เป็น json หรือ parse ได้ ให้ส่งผ่านเลย
-    if (ct.includes('application/json')) {
-      try { return NextResponse.json(JSON.parse(raw), { status: r.status }); }
-      catch { /* ตกมาเคส invalid_json ด้านล่าง */ }
-    }
-    try { return NextResponse.json(JSON.parse(raw), { status: r.status }); }
-    catch {
-      // ให้เห็นชัดๆ ว่า n8n ตอบอะไร (ตัดให้สั้นเพื่อความปลอดภัย)
-      return NextResponse.json({
-        ok: false,
-        error: 'invalid_json',
-        status: r.status,
-        contentType: ct,
-        rawSnippet: raw.slice(0, 400)
-      }, { status: r.status || 502 });
-    }
+    const r = await fetch(`${N8N_BASE}/webhook/ai-chat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-nexroom-client': 'dashboard',
+        'x-nexroom-signature': sig,
+        'origin': 'https://nexroom-dashboard.onrender.com',
+      },
+      body: bodyStr,
+      cache: 'no-store',
+    });
+
+    const data = await r.json();
+    return NextResponse.json(data, { status: r.status });
   } catch (e: any) {
-    return NextResponse.json({ ok:false, error: e?.message || 'unknown_error' }, { status: 500 });
+    console.error(e);
+    return NextResponse.json({ ok:false, error: e?.message || 'proxy_failed' }, { status: 500 });
   }
 }
