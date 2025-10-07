@@ -1,24 +1,29 @@
 import { NextResponse } from 'next/server';
-import { cookies } from 'next/headers';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sid = url.searchParams.get('sid');
-  const max = parseInt(url.searchParams.get('max') || '28800', 10); // default 8 ชม.
+  const maxAge = Number(url.searchParams.get('maxAge') || '28800'); // 8 ชั่วโมง
 
   if (!sid) {
     return NextResponse.json({ ok: false, error: 'missing_sid' }, { status: 400 });
   }
 
-  const jar = await cookies(); // Next.js 14/15: เป็น async
-  jar.set('nxr_session', sid, {
+  // ตั้งคุกกี้แล้วรีไดเรกต์ไป /dashboard
+  const res = NextResponse.redirect(new URL('/dashboard', req.url));
+
+  // หมายเหตุ: ไม่กำหนด domain (ให้ browser จับ subdomain ปัจจุบันอัตโนมัติ)
+  res.cookies.set({
+    name: 'nxr_session',
+    value: sid,
     httpOnly: true,
-    secure: true,
-    sameSite: 'lax',
+    secure: true,          // บังคับบน Render (HTTPS)
+    sameSite: 'lax',       // เปิดจากโดเมนเดียวกัน
     path: '/',
-    maxAge: max,
+    maxAge,                // วินาที
   });
 
-  // กลับไปหน้า dashboard
-  return NextResponse.redirect(new URL('/dashboard', url), { status: 303 });
+  return res;
 }
