@@ -2,94 +2,72 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { Pool } from 'pg';
 
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
 export async function GET() {
   try {
-    // ✅ อ่านคุกกี้ชื่อ nxr_session
-    const cookieStore = await cookies();
-    const sid = cookieStore.get('nxr_session')?.value;
+    const jar = await cookies();
+    const sid = jar.get('nxr_session')?.value || null;
 
     if (!sid) {
-      return NextResponse.json(
-        { ok: false, error: 'unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
     const client = await pool.connect();
 
-    // ✅ ตรวจ session_id จากตาราง session จริงในฐานข้อมูล
-    const session = await client.query(
-      `SELECT staff_id, dorm_id FROM app.staff_session WHERE session_id=$1 AND expires_at > NOW()`,
-      [sid]
+    // หา session → staff_id, dorm_id
+    const s = await client.query(
+      `select ss.staff_id, ss.dorm_id, su.full_name, d.name as dorm_name
+       from app.staff_sessions ss
+       join app.staff_users su on su.staff_id = ss.staff_id
+       left join app.dorms d on d.dorm_id = ss.dorm_id
+       where ss.session_id = $1 and ss.is_valid = true and ss.expires_at > now()
+       limit 1`,
+      [sid],
     );
-
-    if (session.rowCount === 0) {
+    if (s.rowCount === 0) {
       client.release();
-      return NextResponse.json(
-        { ok: false, error: 'session_expired_or_invalid' },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
+    const { dorm_id, dorm_name } = s.rows[0];
 
-    const dormId = session.rows[0].dorm_id;
-
-    // ✅ ดึงชื่อหอพักตาม dorm_id
-    const dormInfo = await client.query(
-      `SELECT dorm_id AS id, dorm_name AS name FROM app.dorms WHERE dorm_id=$1`,
-      [dormId]
+    // ดึงสรุปเฉพาะหอ (ใช้ dorm_id ฟิลเตอร์ทุกตาราง)
+    const { rows: r1 } = await client.query(
+      `select count(*)::int as total from app.rooms where dorm_id = $1`, [dorm_id],
     );
-
-    const dorm = dormInfo.rows[0] || { id: dormId, name: 'Unknown Dorm' };
-
-    // ✅ ดึงสรุปเฉพาะหอของผู้ใช้
-    const rooms = await client.query(
-      `SELECT COUNT(*) AS total FROM app.rooms WHERE dorm_id=$1`,
-      [dormId]
+    const { rows: r2 } = await client.query(
+      `select count(*)::int as occupied from app.rooms where dorm_id = $1 and status='occupied'`, [dorm_id],
     );
-    const occupied = await client.query(
-      `SELECT COUNT(*) AS occupied FROM app.rooms WHERE dorm_id=$1 AND status='occupied'`,
-      [dormId]
+    const { rows: r3 } = await client.query(
+      `select count(*)::int as vacant from app.rooms where dorm_id = $1 and status='vacant'`, [dorm_id],
     );
-    const vacant = await client.query(
-      `SELECT COUNT(*) AS vacant FROM app.rooms WHERE dorm_id=$1 AND status='vacant'`,
-      [dormId]
+    const { rows: r4 } = await client.query(
+      `select count(*)::int as repairing from app.rooms where dorm_id = $1 and status='repairing'`, [dorm_id],
     );
-    const repairing = await client.query(
-      `SELECT COUNT(*) AS repairing FROM app.rooms WHERE dorm_id=$1 AND status='repairing'`,
-      [dormId]
+    const { rows: r5 } = await client.query(
+      `select count(*)::int as unpaid from app.invoices where dorm_id = $1 and status in ('overdue','partially_paid')`, [dorm_id],
     );
-
-    const unpaid = await client.query(
-      `SELECT COUNT(*) AS unpaid FROM app.invoices WHERE dorm_id=$1 AND (status='overdue' OR status='partially_paid')`,
-      [dormId]
-    );
-
-    const open = await client.query(
-      `SELECT COUNT(*) AS open FROM app.maintenance WHERE dorm_id=$1 AND status='open'`,
-      [dormId]
+    const { rows: r6 } = await client.query(
+      `select count(*)::int as open from app.maintenance where dorm_id = $1 and status='open'`, [dorm_id],
     );
 
     client.release();
 
     return NextResponse.json({
       ok: true,
-      dorm,
       summary: {
-        totalRooms: rooms.rows[0].total,
-        occupied: occupied.rows[0].occupied,
-        vacant: vacant.rows[0].vacant,
-        repairing: repairing.rows[0].repairing,
-        unpaidBills: unpaid.rows[0].unpaid,
-        maintenanceOpen: open.rows[0].open,
+        totalRooms: r1[0].total,
+        occupied: r2[0].occupied,
+        vacant: r3[0].vacant,
+        repairing: r4[0].repairing,
+        unpaidBills: r5[0].unpaid,
+        maintenanceOpen: r6[0].open,
       },
+      dorm: { id: dorm_id, name: dorm_name || '-' },
       timestamp: new Date().toISOString(),
     });
   } catch (err: any) {
-    console.error('Dashboard Error:', err);
-    return NextResponse.json({ ok: false, error: err.message }, { status: 500 });
+    console.error('dashboard_error', err);
+    return NextResponse.json({ ok: false, error: err.message || 'server_error' }, { status: 500 });
   }
 }
