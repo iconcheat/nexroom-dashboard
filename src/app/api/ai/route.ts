@@ -1,4 +1,3 @@
-// src/app/api/ai/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
@@ -8,18 +7,14 @@ const N8N_SECRET = process.env.N8N_SIGNING_SECRET!;
 
 export async function POST(req: Request) {
   try {
-    const jar = cookies();
-    const sid = jar.get('nxr_session')?.value || '';
-    if (!sid) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+    const sid = (await cookies()).get('nxr_session')?.value || '';
+    if (!sid) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
 
     const body = await req.json();
     const payload = { message: body.message, context: body.context };
 
-    // stable stringify
-    const keys = new Set<string>();
-    JSON.stringify(payload, (k, v) => (keys.add(k), v));
+    const keys = new Set<string>(); JSON.stringify(payload, (k,v)=> (keys.add(k), v));
     const bodyStr = JSON.stringify(payload, Array.from(keys).sort());
-
     const sig = crypto.createHmac('sha256', N8N_SECRET).update(bodyStr).digest('hex');
 
     const r = await fetch(`${N8N_BASE}/webhook/ai-chat`, {
@@ -36,8 +31,8 @@ export async function POST(req: Request) {
 
     const data = await r.json();
     return NextResponse.json(data, { status: r.status });
-  } catch (e: any) {
+  } catch (e:any) {
     console.error('ai_proxy_error', e);
-    return NextResponse.json({ ok: false, error: e?.message || 'proxy_failed' }, { status: 500 });
+    return NextResponse.json({ ok:false, error: e?.message || 'proxy_failed' }, { status: 500 });
   }
 }

@@ -12,7 +12,7 @@ const pool = new Pool({
 export async function GET() {
   try {
     // อ่านคุกกี้เซสชัน
-    const jar = cookies();
+    const jar = await cookies();
     const sid = jar.get('nxr_session')?.value || null;
     if (!sid) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
