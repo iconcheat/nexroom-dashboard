@@ -1,6 +1,13 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { Pool } from 'pg';
+
+// 👇 เพิ่มตรงนี้
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+});
 
 const N8N_BASE = process.env.N8N_BASE!; // e.g. https://nexroom.onrender.com
 const N8N_SECRET = process.env.N8N_SIGNING_SECRET!;

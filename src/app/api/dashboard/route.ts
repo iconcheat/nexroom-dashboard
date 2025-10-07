@@ -2,7 +2,10 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { Pool } from 'pg';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }, // 👈 เพิ่มบรรทัดนี้
+});
 
 export async function GET() {
   try {
