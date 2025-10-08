@@ -25,8 +25,21 @@ type DashboardApi =
   | { ok: true; summary: Summary; timestamp: string; dorm?: Dorm }
   | { ok: false; error: string };
 
+type Action = {
+  type: 'open_url';
+  label: string;
+  url: string;
+};
+
 type AiApi =
-  | { ok: true; reply?: string; logs?: string[]; results?: AiResult[]; meta?: any }
+  | {
+      ok: true;
+      reply?: string;
+      logs?: string[];
+      results?: AiResult[];
+      actions?: Action[];   // <-- เพิ่มบรรทัดนี้
+      meta?: any;
+    }
   | { ok: false; error: string };
 
 export default function DashboardPage() {
@@ -40,6 +53,7 @@ export default function DashboardPage() {
   const [aiReply, setAiReply] = useState('');
   const [logs, setLogs] = useState<string[]>([]);
   const [results, setResults] = useState<AiResult[]>([]);
+  const [actions, setActions] = useState<Action[]>([]);
 
   // ------------------ โหลดข้อมูลจาก /api/dashboard ------------------
   useEffect(() => {
@@ -72,54 +86,55 @@ export default function DashboardPage() {
 
   // ------------------ ส่งคำสั่งไปยัง n8n ผ่าน /api/ai ------------------
   const handleAskAI = async () => {
-    const q = userInput.trim();
-    if (!q) return;
+  const q = userInput.trim();
+  if (!q) return;
 
-    setLogs((prev) => [...prev, `🧠 User: ${q}`]);
-    setAiReply('⌛ กำลังประมวลผล...');
-    setResults([]);
-    setUserInput('');
+  setLogs((prev) => [...prev, `🧠 User: ${q}`]);
+  setAiReply('⌛ กำลังประมวลผล...');
+  setResults([]);
+  setActions([]);             // <-- เคลียร์ปุ่มก่อนยิง
+  setUserInput('');
 
-    try {
-      const res = await fetch('/api/ai', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          message: q,
-          context: {
-            userId: 'staff_123', // TODO: ดึงจาก session จริง
-            role: 'manager',
-            locale: 'th-TH',
-            ts: new Date().toISOString(),
-            dormId: dorm?.id ?? undefined,
-          },
-        }),
-      });
+  try {
+    const res = await fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      // ❌ ไม่ต้องส่ง context ปลอมแล้ว ให้ส่งเฉพาะ message
+      body: JSON.stringify({ message: q }),
+    });
 
-      const data: AiApi = await res.json();
+    const data: AiApi = await res.json();
 
-      if ('ok' in data && data.ok) {
-        setAiReply(data.reply || '✅ สำเร็จ');
-        if (Array.isArray(data.logs)) setLogs((prev) => [...prev, ...data.logs]);
-        if (Array.isArray(data.results)) {
-          const safe: AiResult[] = data.results.map((r: any) => ({
-            room: String(r?.room ?? ''),
-            period: String(r?.period ?? ''),
-            amount: Number(r?.amount ?? 0),
-            status: String(r?.status ?? 'unknown').toLowerCase(),
-          }));
-          setResults(safe);
-        }
-      } else {
-        const msg = (data as any)?.error || res.statusText || 'unknown_error';
-        setAiReply('❌ เกิดข้อผิดพลาด');
-        setLogs((prev) => [...prev, `ERROR: ${msg}`]);
+    if ('ok' in data && data.ok) {
+      setAiReply(data.reply || '✅ สำเร็จ');
+
+      if (Array.isArray(data.logs)) {
+        setLogs((prev) => [...prev, ...data.logs]);
       }
-    } catch (e: any) {
-      setAiReply('❌ เชื่อมต่อไม่ได้');
-      setLogs((prev) => [...prev, `ERROR: ${e?.message || e}`]);
+
+      if (Array.isArray((data as any).results)) {
+        const safe: AiResult[] = (data as any).results.map((r: any) => ({
+          room: String(r?.room ?? ''),
+          period: String(r?.period ?? ''),
+          amount: Number(r?.amount ?? 0),
+          status: String(r?.status ?? 'unknown').toLowerCase(),
+        }));
+        setResults(safe);
+      }
+
+      if (Array.isArray((data as any).actions)) {
+        setActions((data as any).actions as Action[]);  // <-- เก็บปุ่มจาก n8n
+      }
+    } else {
+      const msg = (data as any)?.error || res.statusText || 'unknown_error';
+      setAiReply('❌ เกิดข้อผิดพลาด');
+      setLogs((prev) => [...prev, `ERROR: ${msg}`]);
     }
-  };
+  } catch (e: any) {
+    setAiReply('❌ เชื่อมต่อไม่ได้');
+    setLogs((prev) => [...prev, `ERROR: ${e?.message || e}`]);
+  }
+};
 
   // ------------------ เวลาที่อัปเดต ------------------
   const updatedText = useMemo(() => {
@@ -215,6 +230,7 @@ export default function DashboardPage() {
                   {aiReply}
                 </div>
               )}
+              <ActionButtons actions={actions} />
             </div>
           </Glass>
         </div>
@@ -382,4 +398,31 @@ function Td({
   className?: string;
 }) {
   return <td className={`px-3 py-2 text-${align} ${className}`}>{children}</td>;
+}
+
+function ActionButtons({ actions }: { actions: Action[] }) {
+  if (!actions || actions.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap gap-3 mt-2">
+      {actions.map((a, i) => {
+        if (a.type === 'open_url') {
+          return (
+            <a
+              key={i}
+              href={a.url}
+              target="_blank"
+              rel="noreferrer"
+              className="btn-neon inline-flex items-center gap-2 px-4 py-2 rounded-md"
+            >
+              {/* ไอคอนลูกศรออกนอกหน้าต่างเล็ก ๆ */}
+              <span className="inline-block" aria-hidden>↗</span>
+              <span>{a.label}</span>
+            </a>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
 }
