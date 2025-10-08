@@ -86,18 +86,26 @@ export async function GET() {
     client.release();
 
     return NextResponse.json({
-      ok: true,
-      summary: {
-        totalRooms: r1[0].total,
-        occupied: r2[0].occupied,
-        vacant: r3[0].vacant,
-        repairing: r4[0].repairing,
-        unpaidBills: r5[0].unpaid,
-        maintenanceOpen: r6[0].open,
-      },
-      dorm: { id: dorm_id, name: dormName },
-      timestamp: new Date().toISOString(),
-    });
+  ok: true,
+  summary: {
+    totalRooms: r1[0].total,
+    occupied: r2[0].occupied,
+    vacant: r3[0].vacant,
+    repairing: r4[0].repairing,
+    unpaidBills: r5[0].unpaid,
+    maintenanceOpen: r6[0].open,
+  },
+  dorm: {
+    id: dorm_id,
+    name: dormName
+  },
+  user: {
+    id: staff_id,        // มาจาก query session ด้านบน เช่น s.rows[0].staff_id
+    name: full_name,     // หรือ su.full_name จาก join app.staff_users
+    role: role           // เช่น su.role
+  },
+  timestamp: new Date().toISOString(),
+});
   } catch (err: any) {
     console.error('dashboard_error', err);
     return NextResponse.json({ ok: false, error: err.message || 'server_error' }, { status: 500 });
