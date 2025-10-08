@@ -15,17 +15,20 @@ const N8N_SECRET = process.env.N8N_SIGNING_SECRET!;
 
 export async function POST(req: Request) {
   try {
-    const sid = cookies().get('nxr_session')?.value || '';
-    if (!sid) return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
+    // ✅ ต้อง await ก่อน (แก้ error: Property 'get' does not exist on type 'Promise<...>')
+    const jar = await cookies();
+    const sid = jar.get('nxr_session')?.value || '';
+    if (!sid) return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
 
-    const { message } = await req.json();
+    const body = await req.json();
+    const message: string = body?.message;
     if (!message || typeof message !== 'string') {
       return NextResponse.json({ ok:false, error:'invalid_message' }, { status: 400 });
     }
 
-    // ดึงตัวตนจริงจาก DB
-    const client = await pool.connect();
-    const q = await client.query(
+    // ดึงข้อมูลผู้ใช้จริงจาก DB ด้วย sid
+    const db = await pool.connect();
+    const q = await db.query(
       `
       select
         ss.session_id,
@@ -44,9 +47,9 @@ export async function POST(req: Request) {
         and ss.expires_at > now()
       limit 1
       `,
-      [sid],
+      [sid]
     );
-    client.release();
+    db.release();
 
     if (q.rowCount === 0) {
       return NextResponse.json({ ok:false, error:'unauthorized' }, { status: 401 });
@@ -57,7 +60,7 @@ export async function POST(req: Request) {
     const dormName =
       dormRow.name ?? dormRow.dorm_name ?? dormRow.title ?? dormRow.dormtitle ?? '-';
 
-    // เซิร์ฟเวอร์ประกอบ context จาก “ข้อมูลจริง”
+    // สร้าง payload จากข้อมูลจริง
     const payload = {
       message,
       context: {
@@ -90,14 +93,14 @@ export async function POST(req: Request) {
       cache: 'no-store',
     });
 
-    // ถ้า n8n ตอบ HTML/ข้อความ ให้ห่อเป็น error อ่านง่าย
-    let data: any;
+    // กันกรณี n8n ตอบเป็น HTML
     const text = await r.text();
+    let data: any;
     try { data = JSON.parse(text); }
     catch { data = { ok:false, error:'invalid_json_from_n8n', raw:text }; }
 
     return NextResponse.json(data, { status: r.status });
-  } catch (e:any) {
+  } catch (e: any) {
     console.error('ai_proxy_error', e);
     return NextResponse.json({ ok:false, error: e?.message || 'proxy_failed' }, { status: 500 });
   }
