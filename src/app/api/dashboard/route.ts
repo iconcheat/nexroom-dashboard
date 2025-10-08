@@ -11,7 +11,7 @@ const pool = new Pool({
 
 export async function GET() {
   try {
-    // อ่านคุกกี้เซสชัน
+    // 1) อ่านคุกกี้เซสชัน
     const jar = await cookies();
     const sid = jar.get('nxr_session')?.value || null;
     if (!sid) {
@@ -20,14 +20,15 @@ export async function GET() {
 
     const client = await pool.connect();
 
-    // หา session → staff_id, dorm_id (+ ดึงทั้งแถวของ dorms เป็น JSON)
+    // 2) หา session + ข้อมูลผู้ใช้/หอ
     const s = await client.query(
       `
-      select
+      select 
         ss.staff_id,
         ss.dorm_id,
         su.full_name,
-        to_json(d) as dorm_row
+        su.role,
+        d.name as dorm_name
       from app.staff_sessions ss
       join app.staff_users su on su.staff_id = ss.staff_id
       left join app.dorms d on d.dorm_id = ss.dorm_id
@@ -44,34 +45,37 @@ export async function GET() {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
-    const { dorm_id, dorm_row } = s.rows[0] as {
+    const {
+      staff_id,
+      dorm_id,
+      full_name,
+      role,
+      dorm_name,
+    } = s.rows[0] as {
+      staff_id: string;
       dorm_id: string;
-      dorm_row: Record<string, any> | null;
+      full_name: string | null;
+      role: string | null;
+      dorm_name: string | null;
     };
 
-    // เดาชื่อคอลัมน์ของ “ชื่อหอพัก”
-    const dormName =
-      (dorm_row?.name as string) ||
-      (dorm_row?.dorm_name as string) ||
-      (dorm_row?.title as string) ||
-      (dorm_row?.dormtitle as string) ||
-      '-';
+    const dormName = dorm_name || '-';
 
-    // นับสรุปเฉพาะหอพักนี้
+    // 3) นับสรุปเฉพาะหอพักนี้
     const { rows: r1 } = await client.query(
       `select count(*)::int as total from app.rooms where dorm_id = $1`,
       [dorm_id],
     );
     const { rows: r2 } = await client.query(
-      `select count(*)::int as occupied from app.rooms where dorm_id = $1 and status='occupied'`,
+      `select count(*)::int as occupied from app.rooms where dorm_id = $1 and status = 'occupied'`,
       [dorm_id],
     );
     const { rows: r3 } = await client.query(
-      `select count(*)::int as vacant from app.rooms where dorm_id = $1 and status='vacant'`,
+      `select count(*)::int as vacant from app.rooms where dorm_id = $1 and status = 'vacant'`,
       [dorm_id],
     );
     const { rows: r4 } = await client.query(
-      `select count(*)::int as repairing from app.rooms where dorm_id = $1 and status='repairing'`,
+      `select count(*)::int as repairing from app.rooms where dorm_id = $1 and status = 'repairing'`,
       [dorm_id],
     );
     const { rows: r5 } = await client.query(
@@ -79,35 +83,39 @@ export async function GET() {
       [dorm_id],
     );
     const { rows: r6 } = await client.query(
-      `select count(*)::int as open from app.maintenance where dorm_id = $1 and status='open'`,
+      `select count(*)::int as open from app.maintenance where dorm_id = $1 and status = 'open'`,
       [dorm_id],
     );
 
     client.release();
 
+    // 4) ส่งผลลัพธ์
     return NextResponse.json({
-  ok: true,
-  summary: {
-    totalRooms: r1[0].total,
-    occupied: r2[0].occupied,
-    vacant: r3[0].vacant,
-    repairing: r4[0].repairing,
-    unpaidBills: r5[0].unpaid,
-    maintenanceOpen: r6[0].open,
-  },
-  dorm: {
-    id: dorm_id,
-    name: dormName
-  },
-  user: {
-    id: staff_id,        // มาจาก query session ด้านบน เช่น s.rows[0].staff_id
-    name: full_name,     // หรือ su.full_name จาก join app.staff_users
-    role: role           // เช่น su.role
-  },
-  timestamp: new Date().toISOString(),
-});
+      ok: true,
+      summary: {
+        totalRooms: r1[0].total,
+        occupied: r2[0].occupied,
+        vacant: r3[0].vacant,
+        repairing: r4[0].repairing,
+        unpaidBills: r5[0].unpaid,
+        maintenanceOpen: r6[0].open,
+      },
+      dorm: {
+        id: dorm_id,
+        name: dormName,
+      },
+      user: {
+        id: staff_id,
+        name: full_name || '-',
+        role: (role || 'viewer').toLowerCase(),
+      },
+      timestamp: new Date().toISOString(),
+    });
   } catch (err: any) {
     console.error('dashboard_error', err);
-    return NextResponse.json({ ok: false, error: err.message || 'server_error' }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err.message || 'server_error' },
+      { status: 500 },
+    );
   }
 }
