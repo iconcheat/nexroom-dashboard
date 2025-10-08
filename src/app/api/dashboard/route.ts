@@ -11,16 +11,14 @@ const pool = new Pool({
 
 export async function GET() {
   try {
-    // 1) อ่านคุกกี้เซสชัน
-    const jar = await cookies();
-    const sid = jar.get('nxr_session')?.value || null;
+    const sid = (await cookies()).get('nxr_session')?.value || null;
     if (!sid) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
     const client = await pool.connect();
 
-    // 2) หา session + ข้อมูลผู้ใช้/หอ
+    // ดึง session + ผู้ใช้ + หอพัก (ทั้งแถว dorms เป็น JSON)
     const s = await client.query(
       `
       select 
@@ -28,7 +26,7 @@ export async function GET() {
         ss.dorm_id,
         su.full_name,
         su.role,
-        d.name as dorm_name
+        row_to_json(d) as dorm_row
       from app.staff_sessions ss
       join app.staff_users su on su.staff_id = ss.staff_id
       left join app.dorms d on d.dorm_id = ss.dorm_id
@@ -45,37 +43,37 @@ export async function GET() {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
-    const {
-      staff_id,
-      dorm_id,
-      full_name,
-      role,
-      dorm_name,
-    } = s.rows[0] as {
+    const { staff_id, dorm_id, full_name, role, dorm_row } = s.rows[0] as {
       staff_id: string;
       dorm_id: string;
       full_name: string | null;
       role: string | null;
-      dorm_name: string | null;
+      dorm_row: Record<string, any> | null;
     };
 
-    const dormName = dorm_name || '-';
+    // เดาชื่อคอลัมน์ของ “ชื่อหอพัก” จาก JSON
+    const dormName =
+      (dorm_row?.name as string) ??
+      (dorm_row?.dorm_name as string) ??
+      (dorm_row?.title as string) ??
+      (dorm_row?.dormtitle as string) ??
+      '-';
 
-    // 3) นับสรุปเฉพาะหอพักนี้
+    // นับสรุปเฉพาะหอนี้
     const { rows: r1 } = await client.query(
       `select count(*)::int as total from app.rooms where dorm_id = $1`,
       [dorm_id],
     );
     const { rows: r2 } = await client.query(
-      `select count(*)::int as occupied from app.rooms where dorm_id = $1 and status = 'occupied'`,
+      `select count(*)::int as occupied from app.rooms where dorm_id = $1 and status='occupied'`,
       [dorm_id],
     );
     const { rows: r3 } = await client.query(
-      `select count(*)::int as vacant from app.rooms where dorm_id = $1 and status = 'vacant'`,
+      `select count(*)::int as vacant from app.rooms where dorm_id = $1 and status='vacant'`,
       [dorm_id],
     );
     const { rows: r4 } = await client.query(
-      `select count(*)::int as repairing from app.rooms where dorm_id = $1 and status = 'repairing'`,
+      `select count(*)::int as repairing from app.rooms where dorm_id = $1 and status='repairing'`,
       [dorm_id],
     );
     const { rows: r5 } = await client.query(
@@ -83,13 +81,12 @@ export async function GET() {
       [dorm_id],
     );
     const { rows: r6 } = await client.query(
-      `select count(*)::int as open from app.maintenance where dorm_id = $1 and status = 'open'`,
+      `select count(*)::int as open from app.maintenance where dorm_id = $1 and status='open'`,
       [dorm_id],
     );
 
     client.release();
 
-    // 4) ส่งผลลัพธ์
     return NextResponse.json({
       ok: true,
       summary: {
@@ -100,10 +97,7 @@ export async function GET() {
         unpaidBills: r5[0].unpaid,
         maintenanceOpen: r6[0].open,
       },
-      dorm: {
-        id: dorm_id,
-        name: dormName,
-      },
+      dorm: { id: dorm_id, name: dormName },
       user: {
         id: staff_id,
         name: full_name || '-',
@@ -113,9 +107,6 @@ export async function GET() {
     });
   } catch (err: any) {
     console.error('dashboard_error', err);
-    return NextResponse.json(
-      { ok: false, error: err.message || 'server_error' },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: err.message || 'server_error' }, { status: 500 });
   }
 }
