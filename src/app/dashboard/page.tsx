@@ -368,4 +368,17 @@ function CardKPI({ span, title, value, desc, color, chips }: any) {
 }
 
 function CardChart({ span, id, title, value, color }: any) {
- 
+  return (
+    <section className="card" style={{ gridColumn: `span ${span}`, height: 180 }}>
+      <div className="kpi" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div className="label">{title}</div>
+          <div className="value" style={{ color }}>{value}</div>
+        </div>
+      </div>
+      <div style={{ position: 'relative', height: 80 }}>
+        <canvas id={id} />
+      </div>
+    </section>
+  );
+}
