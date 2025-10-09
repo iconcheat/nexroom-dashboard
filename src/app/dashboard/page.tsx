@@ -175,15 +175,35 @@ useEffect(() => {
       const data = await res.json();
 
       if (data.ok) {
-        let result = data.reply || '✅ สำเร็จ';
-        if (Array.isArray(data.results)) {
-          result += '\n\n' + data.results.map((r: any) =>
-            `• ห้อง ${r.room} · งวด ${r.period} · ฿${r.amount.toLocaleString('th-TH')}`
-          ).join('\n');
+  let result = data.reply || '✅ สำเร็จ';
+
+  if (Array.isArray(data.results)) {
+    result += '\n\n' + data.results.map((r: any) =>
+      `• ห้อง ${r.room} · งวด ${r.period} · ฿${r.amount.toLocaleString('th-TH')}`
+    ).join('\n');
+  }
+
+  if (data.logs?.length) result += '\n\n🪶 Log:\n' + data.logs.join('\n');
+  out.textContent = result;
+
+  // ✅ แสดงปุ่ม Action ถ้ามี
+  const actionBox = document.getElementById('aiActions');
+  if (actionBox) {
+    actionBox.innerHTML = '';
+    if (Array.isArray(data.actions)) {
+      data.actions.forEach((a: any) => {
+        if (a.type === 'open_url') {
+          const btn = document.createElement('a');
+          btn.href = a.url;
+          btn.target = '_blank';
+          btn.textContent = a.label || 'เปิดลิงก์';
+          btn.className = 'cta';
+          actionBox.appendChild(btn);
         }
-        if (data.logs?.length) result += '\n\n🪶 Log:\n' + data.logs.join('\n');
-        out.textContent = result;
-      } else {
+      });
+    }
+  }
+} else {
         out.textContent = '❌ ' + (data.error || 'เกิดข้อผิดพลาดจาก AI');
       }
     } catch (err: any) {
@@ -249,6 +269,7 @@ useEffect(() => {
                 <button id="btnAI" className="cta">ส่ง</button>
               </div>
               <pre id="aiOut" className="ai-out">ผลลัพธ์จะปรากฏที่นี่…</pre>
+              <div id="aiActions" style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 10 }}></div>
             </section>
           </div>
         </div>
