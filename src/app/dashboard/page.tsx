@@ -151,24 +151,49 @@ export default function DashboardPage() {
       });
   }, []);
 
-  // === AI Chat mock ===
-  useEffect(() => {
-    const btn = document.getElementById('btnAI');
-    const out = document.getElementById('aiOut');
-    const inp = document.getElementById('aiInput') as HTMLInputElement;
-    const run = () => {
-      if (!out || !inp) return;
-      const q = inp.value.trim();
-      if (!q) {
-        out.textContent = 'พิมพ์คำสั่ง เช่น “แสดงบิลค้างเดือนนี้”';
-        return;
+  /* ===== AI Chat จริง (เรียก API /api/ai) ===== */
+useEffect(() => {
+  const btn = document.getElementById('btnAI');
+  const out = document.getElementById('aiOut');
+  const inp = document.getElementById('aiInput') as HTMLInputElement;
+
+  const run = async () => {
+    if (!out || !inp) return;
+    const q = inp.value.trim();
+    if (!q) {
+      out.textContent = 'พิมพ์คำสั่ง เช่น “แสดงบิลค้างเดือนนี้”';
+      return;
+    }
+
+    out.textContent = '⌛ กำลังประมวลผล...';
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: q }),
+      });
+      const data = await res.json();
+
+      if (data.ok) {
+        let result = data.reply || '✅ สำเร็จ';
+        if (Array.isArray(data.results)) {
+          result += '\n\n' + data.results.map((r: any) =>
+            `• ห้อง ${r.room} · งวด ${r.period} · ฿${r.amount.toLocaleString('th-TH')}`
+          ).join('\n');
+        }
+        if (data.logs?.length) result += '\n\n🪶 Log:\n' + data.logs.join('\n');
+        out.textContent = result;
+      } else {
+        out.textContent = '❌ ' + (data.error || 'เกิดข้อผิดพลาดจาก AI');
       }
-      out.textContent =
-        `🧠 Intent: SHOW_OVERDUE_INVOICES\n✅ มีบิลค้างชำระ 12 รายการ รวม 32,400 บาท\n\n• ห้อง A305 · งวด 2025-10 · ฿3,200\n• ห้อง B412 · งวด 2025-10 · ฿2,800\n• ห้อง C208 · งวด 2025-09 · ฿3,000\n\nℹ️ อ้างอิง mock data`;
-    };
-    btn?.addEventListener('click', run);
-    return () => btn?.removeEventListener('click', run);
-  }, []);
+    } catch (err: any) {
+      out.textContent = '❌ ไม่สามารถเชื่อมต่อได้ (' + err.message + ')';
+    }
+  };
+
+  btn?.addEventListener('click', run);
+  return () => btn?.removeEventListener('click', run);
+}, []);
 
   return (
     <>
