@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+/* ---------- Types: เหมือนเดิม ---------- */
 type Summary = {
   totalRooms: number;
   occupied: number;
@@ -11,37 +12,17 @@ type Summary = {
   unpaidBills: number;
   maintenanceOpen: number;
 };
-
 type Dorm = { id: string; name: string };
-
-type AiResult = {
-  room: string;
-  period: string;
-  amount: number;
-  status: string;
-};
-
+type AiResult = { room: string; period: string; amount: number; status: string };
 type DashboardApi =
   | { ok: true; summary: Summary; timestamp: string; dorm?: Dorm }
   | { ok: false; error: string };
-
-type Action = {
-  type: 'open_url';
-  label: string;
-  url: string;
-};
-
+type Action = { type: 'open_url'; label: string; url: string };
 type AiApi =
-  | {
-      ok: true;
-      reply?: string;
-      logs?: string[];
-      results?: AiResult[];
-      actions?: Action[];   // <-- เพิ่มบรรทัดนี้
-      meta?: any;
-    }
+  | { ok: true; reply?: string; logs?: string[]; results?: AiResult[]; actions?: Action[]; meta?: any }
   | { ok: false; error: string };
 
+/* ---------- Page ---------- */
 export default function DashboardPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [ts, setTs] = useState<string>('');
@@ -55,16 +36,14 @@ export default function DashboardPage() {
   const [results, setResults] = useState<AiResult[]>([]);
   const [actions, setActions] = useState<Action[]>([]);
 
-  // ------------------ โหลดข้อมูลจาก /api/dashboard ------------------
+  /* ---------- โหลดข้อมูลเหมือนเดิม ---------- */
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
         const res = await fetch('/api/dashboard', { cache: 'no-store' });
         const data: DashboardApi = await res.json();
-
         if (!alive) return;
-
         if ('ok' in data && data.ok) {
           setSummary(data.summary);
           setTs(data.timestamp);
@@ -84,96 +63,85 @@ export default function DashboardPage() {
     };
   }, []);
 
-  // ------------------ ส่งคำสั่งไปยัง n8n ผ่าน /api/ai ------------------
+  /* ---------- ส่งคำสั่งไป AI เหมือนเดิม ---------- */
   const handleAskAI = async () => {
-  const q = userInput.trim();
-  if (!q) return;
+    const q = userInput.trim();
+    if (!q) return;
 
-  setLogs((prev) => [...prev, `🧠 User: ${q}`]);
-  setAiReply('⌛ กำลังประมวลผล...');
-  setResults([]);
-  setActions([]);             // <-- เคลียร์ปุ่มก่อนยิง
-  setUserInput('');
+    setLogs((prev) => [...prev, `🧠 User: ${q}`]);
+    setAiReply('⌛ กำลังประมวลผล...');
+    setResults([]);
+    setActions([]);
+    setUserInput('');
 
-  try {
-    const res = await fetch('/api/ai', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      // ❌ ไม่ต้องส่ง context ปลอมแล้ว ให้ส่งเฉพาะ message
-      body: JSON.stringify({ message: q }),
-    });
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: q }),
+      });
+      const data: AiApi = await res.json();
 
-    const data: AiApi = await res.json();
-
-    if ('ok' in data && data.ok) {
-      setAiReply(data.reply || '✅ สำเร็จ');
-
-      if (Array.isArray(data.logs)) {
-        setLogs((prev) => [...prev, ...data.logs]);
+      if ('ok' in data && data.ok) {
+        setAiReply(data.reply || '✅ สำเร็จ');
+        if (Array.isArray(data.logs)) setLogs((prev) => [...prev, ...data.logs]);
+        if (Array.isArray((data as any).results)) {
+          const safe: AiResult[] = (data as any).results.map((r: any) => ({
+            room: String(r?.room ?? ''),
+            period: String(r?.period ?? ''),
+            amount: Number(r?.amount ?? 0),
+            status: String(r?.status ?? 'unknown').toLowerCase(),
+          }));
+          setResults(safe);
+        }
+        if (Array.isArray((data as any).actions)) setActions(data.actions as Action[]);
+      } else {
+        const msg = (data as any)?.error || res.statusText || 'unknown_error';
+        setAiReply('❌ เกิดข้อผิดพลาด');
+        setLogs((prev) => [...prev, `ERROR: ${msg}`]);
       }
-
-      if (Array.isArray((data as any).results)) {
-        const safe: AiResult[] = (data as any).results.map((r: any) => ({
-          room: String(r?.room ?? ''),
-          period: String(r?.period ?? ''),
-          amount: Number(r?.amount ?? 0),
-          status: String(r?.status ?? 'unknown').toLowerCase(),
-        }));
-        setResults(safe);
-      }
-
-      if (Array.isArray((data as any).actions)) {
-        setActions((data as any).actions as Action[]);  // <-- เก็บปุ่มจาก n8n
-      }
-    } else {
-      const msg = (data as any)?.error || res.statusText || 'unknown_error';
-      setAiReply('❌ เกิดข้อผิดพลาด');
-      setLogs((prev) => [...prev, `ERROR: ${msg}`]);
+    } catch (e: any) {
+      setAiReply('❌ เชื่อมต่อไม่ได้');
+      setLogs((prev) => [...prev, `ERROR: ${e?.message || e}`]);
     }
-  } catch (e: any) {
-    setAiReply('❌ เชื่อมต่อไม่ได้');
-    setLogs((prev) => [...prev, `ERROR: ${e?.message || e}`]);
-  }
-};
+  };
 
-  // ------------------ เวลาที่อัปเดต ------------------
+  /* ---------- เวลาอัปเดต ---------- */
   const updatedText = useMemo(() => {
     if (!ts) return '—';
-    try {
-      return new Date(ts).toLocaleString('th-TH');
-    } catch {
-      return ts;
-    }
+    try { return new Date(ts).toLocaleString('th-TH'); } catch { return ts; }
   }, [ts]);
 
-  // ------------------ ส่วนแสดงผล ------------------
+  /* ---------- UI: Neon/Cyber-glass + motion (สไตล์ใหม่) ---------- */
   return (
-    <main className="min-h-screen text-white relative overflow-hidden">
+    <main className="min-h-screen text-white relative overflow-hidden bg-[#0D0718]">
       {/* Background layers */}
-      <div className="bg-stars" />
-      <div className="grid-overlay" />
-      <div className="scanline" />
-      <div className="aurora" />
+      <Aurora />
+      <Particles />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(1000px_600px_at_12%_12%,#34165f_0%,transparent_60%),radial-gradient(900px_540px_at_88%_18%,#2b0c53_0%,transparent_60%),radial-gradient(900px_540px_at_30%_100%,#270a43_0%,transparent_60%)] opacity-60" />
 
       {/* HEADER */}
-      <div className="max-w-7xl mx-auto px-6 pt-10">
+      <div className="max-w-7xl mx-auto px-6 pt-10 relative z-10">
         <div className="flex flex-col gap-1 text-center md:text-left">
-          <h1 className="font-orbitron text-4xl md:text-6xl tracking-[.08em] drop-shadow-[0_0_25px_rgba(0,245,255,.4)]">
-            {dorm?.name ?? '—'}
-          </h1>
+          <div className="inline-flex items-center gap-3 justify-center md:justify-start">
+            <div className="h-11 w-11 rounded-xl animate-[pulse_3.6s_ease-in-out_infinite] shadow-[0_0_40px_#a855f7aa] bg-[conic-gradient(from_210deg,#8A2BE2,#FF5BD6,#FF7A00,#8A2BE2)]" />
+            <h1 className="font-orbitron text-3xl md:text-5xl tracking-[.08em] drop-shadow-[0_0_25px_rgba(255,122,0,.35)]">
+              {dorm?.name ?? '—'}
+            </h1>
+          </div>
           <h2 className="title flex items-baseline gap-2 justify-center md:justify-start text-white/90">
-            <span>NEX</span>
-            <span className="neon-teal">Room</span>
+            <span className="text-white/80">NEX</span>
+            <span className="text-[#00F5FF] drop-shadow-[0_0_10px_rgba(0,245,255,.6)]">Room</span>
             <span className="text-white/60 text-base md:text-lg tracking-widest">
               • SMART DORM AI CONTROL CENTER
             </span>
           </h2>
         </div>
-        <div className="beam" />
+        <div className="h-1.5 w-full mt-4 rounded-full bg-gradient-to-r from-[#8A2BE2] via-[#FF5BD6] to-[#FF7A00] animate-[shimmer_6s_linear_infinite] bg-[length:200%_100%]" />
       </div>
 
       {/* CONTENT */}
-      <section className="max-w-7xl mx-auto px-6 pb-20 pt-8 grid grid-cols-1 xl:grid-cols-3 gap-8 font-ui">
+      <section className="max-w-7xl mx-auto px-6 pb-20 pt-10 grid grid-cols-1 xl:grid-cols-3 gap-8 font-ui relative z-10">
         {/* LEFT */}
         <div className="space-y-8 xl:col-span-2">
           {/* SUMMARY CARDS */}
@@ -183,17 +151,15 @@ export default function DashboardPage() {
                 ⏳ กำลังโหลดข้อมูล...
               </Glass>
             ) : loadErr ? (
-              <Glass className="col-span-3 text-center text-rose-300 py-6">
-                ❌ {loadErr}
-              </Glass>
+              <Glass className="col-span-3 text-center text-rose-300 py-6">❌ {loadErr}</Glass>
             ) : summary ? (
               <>
-                <StatCard label="TOTAL ROOMS" value={summary.totalRooms} accent="teal" />
-                <StatCard label="OCCUPIED" value={summary.occupied} accent="emerald" />
-                <StatCard label="VACANT" value={summary.vacant} accent="cyan" />
-                <StatCard label="REPAIRING" value={summary.repairing} accent="amber" />
-                <StatCard label="UNPAID BILLS" value={summary.unpaidBills} accent="magenta" />
-                <StatCard label="MAINTENANCE OPEN" value={summary.maintenanceOpen} accent="violet" />
+                <StatCard label="TOTAL ROOMS" value={summary.totalRooms} />
+                <StatCard label="OCCUPIED" value={summary.occupied} />
+                <StatCard label="VACANT" value={summary.vacant} />
+                <StatCard label="REPAIRING" value={summary.repairing} />
+                <StatCard label="UNPAID BILLS" value={summary.unpaidBills} />
+                <StatCard label="MAINTENANCE OPEN" value={summary.maintenanceOpen} />
               </>
             ) : (
               <Glass className="col-span-3 text-center text-white/60 py-6">—</Glass>
@@ -220,9 +186,7 @@ export default function DashboardPage() {
                 <p className="text-xs text-white/60 tracking-wide">
                   เคล็ดลับ: ใช้รูปประโยค <b>กริยา + วัตถุ</b> เช่น “แสดงอินวอยเดือนนี้ของทุกห้อง”
                 </p>
-                <button onClick={handleAskAI} className="btn-neon">
-                  ส่งคำสั่ง
-                </button>
+                <button onClick={handleAskAI} className="btn-neon">ส่งคำสั่ง</button>
               </div>
 
               {aiReply && (
@@ -246,11 +210,7 @@ export default function DashboardPage() {
                 {logs.length === 0 ? (
                   <p className="text-white/60 text-center">ยังไม่มีการทำงาน</p>
                 ) : (
-                  logs.map((line, i) => (
-                    <p key={i} className="text-white/85">
-                      {line}
-                    </p>
-                  ))
+                  logs.map((line, i) => <p key={i} className="text-white/85">{line}</p>)
                 )}
               </div>
             </div>
@@ -268,10 +228,7 @@ export default function DashboardPage() {
                   <table className="min-w-full text-sm">
                     <thead>
                       <tr className="text-white/70">
-                        <Th>ROOM</Th>
-                        <Th>PERIOD</Th>
-                        <Th align="right">AMOUNT</Th>
-                        <Th>STATUS</Th>
+                        <Th>ROOM</Th><Th>PERIOD</Th><Th align="right">AMOUNT</Th><Th>STATUS</Th>
                       </tr>
                     </thead>
                     <tbody>
@@ -279,20 +236,14 @@ export default function DashboardPage() {
                         <tr key={i} className="hover:bg-white/5 transition">
                           <Td className="font-digits">{r.room}</Td>
                           <Td className="font-digits">{r.period}</Td>
-                          <Td align="right" className="font-digits">
-                            {Number(r.amount ?? 0).toLocaleString('th-TH')}
-                          </Td>
+                          <Td align="right" className="font-digits">{Number(r.amount ?? 0).toLocaleString('th-TH')}</Td>
                           <Td>
-                            <span
-                              className={
-                                'px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide border ' +
-                                (r.status === 'paid'
-                                  ? 'bg-emerald-400/15 text-emerald-200 border-emerald-300/30'
-                                  : 'bg-rose-400/15 text-rose-200 border-rose-300/30')
-                              }
-                            >
-                              {r.status}
-                            </span>
+                            <span className={
+                              'px-2 py-0.5 rounded-md text-[11px] font-semibold uppercase tracking-wide border ' +
+                              (r.status === 'paid'
+                                ? 'bg-emerald-400/15 text-emerald-200 border-emerald-300/30'
+                                : 'bg-rose-400/15 text-rose-200 border-rose-300/30')
+                            }>{r.status}</span>
                           </Td>
                         </tr>
                       ))}
@@ -301,128 +252,120 @@ export default function DashboardPage() {
                 </div>
               )}
             </div>
-            <div className="px-5 pb-4">
-              <p className="text-center text-[11px] text-white/50">⏱ Updated: {updatedText}</p>
-            </div>
+            <div className="px-5 pb-4"><p className="text-center text-[11px] text-white/50">⏱ Updated: {updatedText}</p></div>
           </Glass>
         </div>
       </section>
 
-      {/* BACKGROUND EFFECT STYLES */}
+      {/* Global styles for neon/glass + animations */}
       <style jsx global>{`
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Oxanium:wght@400;700&family=Rajdhani:wght@400;500;700&display=swap');
+        .font-ui{font-family:'Rajdhani',ui-sans-serif,system-ui}
+        .font-digits{font-family:'Oxanium',monospace;letter-spacing:.3px}
+        .font-orbitron{font-family:'Orbitron',sans-serif}
+        @keyframes shimmer{0%{background-position:0% 0}100%{background-position:200% 0}}
+        @keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 0 20px #a855f766,inset 0 0 10px #fff2}50%{transform:scale(1.03);box-shadow:0 0 44px #a855f7aa,inset 0 0 22px #fff4}}
 
-        :root {
-          --bg: #070b12;
-          --glass: rgba(255, 255, 255, 0.06);
-          --stroke: rgba(255, 255, 255, 0.12);
-          --neon-teal: #00f5ff;
-          --neon-cyan: #5cf9ff;
+        .glass{
+          background: linear-gradient(165deg, rgba(255,255,255,.12), rgba(255,255,255,.06));
+          border:1px solid rgba(255,255,255,.16);
+          border-radius:20px; backdrop-filter: blur(10px);
+          box-shadow: 0 10px 28px -8px rgba(0,0,0,.65), 0 0 0 1px rgba(255,255,255,.08) inset, 0 0 42px 0 rgba(124,58,237,.25);
+          transition: transform .28s ease, box-shadow .28s ease, border-color .28s ease;
+          position:relative; overflow:hidden;
         }
-        .font-ui {
-          font-family: 'Rajdhani', ui-sans-serif, system-ui;
+        .glass:hover{ transform: translateY(-2px); border-color: rgba(255,255,255,.26); box-shadow:0 0 35px rgba(255,122,0,.25),0 0 20px rgba(138,43,226,.25),0 0 6px 1px rgba(255,255,255,.2) inset }
+        .glass::after{
+          content:""; position:absolute; left:10%; right:10%; bottom:0; height:2px; border-radius:2px;
+          background: linear-gradient(90deg,#8A2BE2,#FF5BD6,#FF7A00); opacity:.6; transform: scaleX(0); transform-origin:left;
+          animation: grow 1s ease forwards; animation-delay:.2s;
         }
-        .font-digits {
-          font-family: 'Oxanium', monospace;
-          letter-spacing: 0.3px;
+        @keyframes grow{to{transform:scaleX(1)}}
+
+        .btn-neon{
+          padding:.6rem 1rem; border-radius:.75rem; border:1px solid rgba(255,255,255,.28);
+          background: linear-gradient(160deg, rgba(255,255,255,.18), rgba(255,255,255,.08));
+          box-shadow: 0 0 20px rgba(255,122,0,.25);
         }
-        .font-orbitron {
-          font-family: 'Orbitron', sans-serif;
-        }
-        .neon-teal {
-          color: var(--neon-teal);
-          text-shadow: 0 0 10px rgba(0, 245, 255, 0.6);
-        }
-        .beam {
-          height: 4px;
-          width: 100%;
-          margin-top: 16px;
-          border-radius: 9999px;
-          background: linear-gradient(90deg, var(--neon-teal), var(--neon-cyan), var(--neon-teal));
-          box-shadow: 0 0 24px rgba(0, 245, 255, 0.45);
-          animation: shimmer 5s linear infinite;
-          background-size: 200% 100%;
-        }
-        @keyframes shimmer {
-          0% {
-            background-position: 0% 0;
-          }
-          100% {
-            background-position: 200% 0;
-          }
-        }
+        .btn-neon:hover{ background: linear-gradient(160deg, rgba(255,255,255,.24), rgba(255,255,255,.12)); }
+
+        .badge{font-size:12px;padding:4px 8px;border-radius:9px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.2)}
+        .dot{width:10px;height:10px;border-radius:9999px;background:#00F5FF;box-shadow:0 0 12px rgba(0,245,255,.7)}
+        .dot-pulse{animation:dotpulse 1.6s ease-in-out infinite}
+        @keyframes dotpulse{0%,100%{transform:scale(.9);opacity:.6}50%{transform:scale(1.1);opacity:1}}
       `}</style>
     </main>
   );
 }
 
-// ---------- Helpers ----------
+/* ---------- Neon helpers ---------- */
 function Glass({ children, className = '' }: { children: React.ReactNode; className?: string }) {
   return <div className={`glass ${className}`}>{children}</div>;
 }
-
-function StatCard({
-  label,
-  value,
-  accent = 'teal',
-}: {
-  label: string;
-  value: string | number;
-  accent?: 'teal' | 'emerald' | 'cyan' | 'amber' | 'magenta' | 'violet';
-}) {
+function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="glass p-5 relative overflow-hidden">
+    <div className="glass p-5">
       <p className="text-[11px] tracking-[.35em] text-white/70 font-semibold">{label}</p>
       <p className="mt-2 text-4xl font-extrabold text-white/95 font-digits">{value}</p>
     </div>
   );
 }
-
-function Th({
-  children,
-  align = 'left',
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right' | 'center';
-}) {
+function Th({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'right' | 'center' }) {
   return <th className={`px-3 py-2 text-${align}`}>{children}</th>;
 }
-
 function Td({
-  children,
-  align = 'left',
-  className = '',
-}: {
-  children: React.ReactNode;
-  align?: 'left' | 'right' | 'center';
-  className?: string;
-}) {
+  children, align = 'left', className = '',
+}: { children: React.ReactNode; align?: 'left' | 'right' | 'center'; className?: string }) {
   return <td className={`px-3 py-2 text-${align} ${className}`}>{children}</td>;
 }
-
 function ActionButtons({ actions }: { actions: Action[] }) {
   if (!actions || actions.length === 0) return null;
-
   return (
     <div className="flex flex-wrap gap-3 mt-2">
-      {actions.map((a, i) => {
-        if (a.type === 'open_url') {
-          return (
-            <a
-              key={i}
-              href={a.url}
-              target="_blank"
-              rel="noreferrer"
-              className="btn-neon inline-flex items-center gap-2 px-4 py-2 rounded-md"
-            >
-              {/* ไอคอนลูกศรออกนอกหน้าต่างเล็ก ๆ */}
-              <span className="inline-block" aria-hidden>↗</span>
-              <span>{a.label}</span>
-            </a>
-          );
+      {actions.map((a, i) =>
+        a.type === 'open_url' ? (
+          <a key={i} href={a.url} target="_blank" rel="noreferrer" className="btn-neon inline-flex items-center gap-2 px-4 py-2 rounded-md">
+            <span aria-hidden>↗</span><span>{a.label}</span>
+          </a>
+        ) : null
+      )}
+    </div>
+  );
+}
+
+/* ---------- Animated BG (Aurora + Particles) ---------- */
+function Aurora() {
+  return (
+    <div
+      className="pointer-events-none fixed inset-0 -z-10 opacity-35"
+      style={{
+        background: 'linear-gradient(120deg, #44206f, #22113f, #44206f)',
+        mixBlendMode: 'screen',
+        filter: 'blur(50px)',
+        animation: 'aurora 26s ease-in-out infinite alternate',
+      }}
+    >
+      <style jsx>{`
+        @keyframes aurora {
+          0% { transform: translateX(-6%) rotate(0deg) scale(1); }
+          100% { transform: translateX(6%) rotate(2deg) scale(1.04); }
         }
-        return null;
-      })}
+      `}</style>
+    </div>
+  );
+}
+function Particles() {
+  // lightweight CSS-only starfield shimmer
+  return (
+    <div className="pointer-events-none fixed inset-0 -z-10">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_30%,rgba(255,122,0,.10),transparent_60%)] animate-[float_12s_ease-in-out_infinite]" />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(138,43,226,.10),transparent_60%)] animate-[float_16s_ease-in-out_infinite_reverse]" />
+      <style jsx>{`
+        @keyframes float {
+          0%,100% { transform: translateY(-2%); }
+          50% { transform: translateY(2%); }
+        }
+      `}</style>
     </div>
   );
 }
