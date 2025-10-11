@@ -1,45 +1,33 @@
-// /src/app/api/ai/callback/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
-import { Pool } from 'pg';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const SHARED = process.env.N8N_SIGNING_SECRET!;
+const SECRET = process.env.AGENT_WEBHOOK_SECRET!;
 
-// ใช้ in-memory broadcaster ง่ายๆ (หรือย้ายไป Redis Pub/Sub ก็ได้)
-type Client = { id: string; dormId: string; res: WritableStreamDefaultWriter };
-const clients = new Map<string, Client>();
-
-export async function POST(req: NextRequest) {
-  const raw = await req.text();
-  const sig = req.headers.get('x-nexroom-signature') || '';
-  const calc = crypto.createHmac('sha256', SHARED).update(raw).digest('hex');
-  if (sig !== calc) return NextResponse.json({ ok: false }, { status: 401 });
-
-  const body = JSON.parse(raw);
-  // body = { event:'reserve_summary'|'payment_done', dorm_id, booking_id, ... }
-
-  // 2) persist สำรอง (ใช้ app.logs)
-  const client = await pool.connect();
-  try {
-    await client.query(
-      `INSERT INTO app.logs (flow, event, ref_id, actor, ok, detail)
-       VALUES ($1,$2,$3,'n8n',true,$4::jsonb)`,
-      ['reservation', body.event, body.booking_id || body.job_id || '', JSON.stringify(body)]
-    );
-  } finally {
-    client.release();
-  }
-
-  // 3) broadcast ให้ผู้ที่ subscribe dorm_id นี้อยู่
-  const payload = JSON.stringify({ type: 'event', data: body, ts: Date.now() });
-  for (const c of clients.values()) {
-    if (c.dormId === body.dorm_id) {
-      try { await c.res.write(`${payload}\n`); } catch {}
-    }
-  }
-  return NextResponse.json({ ok: true });
+function safeEq(a: string, b: string) {
+  const A = Buffer.from(a);
+  const B = Buffer.from(b);
+  return A.length === B.length && crypto.timingSafeEqual(A, B);
 }
 
-// สำหรับให้ SSE ลงทะเบียน client
-export const clientsRegistry = clients;
+export async function POST(req: NextRequest) {
+  // 1) อ่าน "raw text" ก่อน
+  const raw = await req.text();
+
+  // 2) ดึง signature จาก header
+  const sig = req.headers.get('x-agent-signature') || '';
+
+  // 3) คำนวณ HMAC จาก raw เดิม
+  const calc = crypto.createHmac('sha256', SECRET).update(raw).digest('hex');
+
+  // 4) เทียบแบบ timingSafeEqual
+  if (!safeEq(calc, sig)) {
+    return NextResponse.json({ ok: false, error: 'bad_signature' }, { status: 401 });
+  }
+
+  // 5) parse ภายหลัง (ปลอดภัยแล้ว)
+  let body: any = {};
+  try { body = JSON.parse(raw); } catch {}
+
+  // ... (บันทึก log + broadcast SSE)
+  return NextResponse.json({ ok: true });
+}
