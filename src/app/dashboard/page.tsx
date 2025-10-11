@@ -1,10 +1,101 @@
 'use client';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Script from 'next/script';
 
 export default function DashboardPage() {
+    // === Agent/Events State ===
+  const [summary, setSummary] = useState<any | null>(null);
+  const [paying, setPaying] = useState(false);
+
+  // ใช้ dormId จริงของคุณ (เช่นมาจาก session); ใส่ค่าชั่วคราวไปก่อน
+  const dormId = 'PD-PLACE';
+
+  // n8n cash webhook (ต้องตั้ง NEXT_PUBLIC_N8N_CASH_WEBHOOK ใน .env)
+  const CASH_WEBHOOK = '/api/payments/cash';
+
+  const fmtTH = (n: number) =>
+    typeof n === 'number' ? n.toLocaleString('th-TH') : String(n ?? '');
+
+  // กด "ชำระเงินสดตอนนี้"
+  const handlePayCashNow = async () => {
+    if (!summary) return alert('ยังไม่มีข้อมูลสรุป');
+    if (!CASH_WEBHOOK) return alert('ยังไม่ได้ตั้ง NEXT_PUBLIC_N8N_CASH_WEBHOOK');
+
+    const act = (summary.next_actions || []).find((a: any) => a.type === 'pay_cash_now');
+    const payload = act?.payload || {
+      dorm_id: summary.dorm_id,
+      booking_id: summary.booking_id,
+      amount: summary.money?.must_pay_today,
+    };
+
+    try {
+      setPaying(true);
+      const res = await fetch(CASH_WEBHOOK, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...payload,
+          cashier: 'Manager',
+          paid_at: new Date().toISOString(),
+          job_id: summary.job_id || undefined, // ถ้ามี
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      alert('บันทึกชำระเงินสดแล้ว (รอ event: payment_done)');
+    } catch (err: any) {
+      alert('ชำระเงินสดล้มเหลว: ' + err?.message);
+    } finally {
+      setPaying(false);
+    }
+  };
   // === Particle Effect ===
+    // === SSE: ฟังอีเวนต์จาก Agent (/api/ai/stream?dorm_id=...) ===
+  useEffect(() => {
+  let es: EventSource | null = null;
+  let retry = 0;
+
+  const connect = () => {
+    es = new EventSource(`/api/ai/stream?dorm_id=${encodeURIComponent(dormId)}`);
+
+    es.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(ev.data || '{}');
+        const event = msg.event || msg?.data?.event;
+        const data  = msg.data  || msg;
+
+        if (event === 'reserve_summary') setSummary(data);
+        if (event === 'payment_done') {
+          setSummary(prev => {
+            if (!prev) return prev;
+            const sameBooking = !prev.booking_id || prev.booking_id === (data?.booking_id || prev.booking_id);
+            if (!sameBooking) return prev;
+            const paid = Number(data?.amount ?? 0);
+            const remain = Math.max(0, Number(prev.money?.remain_today ?? 0) - paid);
+            return {
+              ...prev,
+              money: {
+                ...(prev.money || {}),
+                paid_today: Number(prev.money?.paid_today || 0) + paid,
+                remain_today: remain,
+              },
+            };
+          });
+        }
+      } catch {}
+    };
+
+    es.onerror = () => {
+      es?.close();
+      const backoff = Math.min(1000 * Math.pow(2, retry++), 15000); // 1s → 2s → 4s … capped 15s
+      setTimeout(connect, backoff);
+    };
+  };
+
+  connect();
+  return () => { es?.close(); };
+}, [dormId]);
+
   useEffect(() => {
     const cvs = document.getElementById('particles') as HTMLCanvasElement | null;
     if (!cvs) return;
@@ -259,7 +350,53 @@ useEffect(() => {
             <section className="card col-8"><div className="label">แนวโน้มรายได้ & ค้างชำระ (6 เดือน)</div><div style={{ height: 200 }}><canvas id="mainLine" /></div></section>
             <section className="card col-4"><div className="label">วงแหวนอัตราเข้าพัก</div><div className="ring" style={{ '--deg': '316deg' } as any}><div className="txt">88%</div></div></section>
 
-            <section className="card col-4"><div className="label">การใช้ไฟ/น้ำ</div><div style={{ height: 180 }}><canvas id="miniBars" /></div></section>
+            <section className="card col-4" id="reserveSummary">
+  <div className="label">สรุปการจองล่าสุด</div>
+
+  {!summary ? (
+    <div className="muted" style={{ padding: 12 }}>
+      ยังไม่มีอีเวนต์ <code>reserve_summary</code> — รอการจองเสร็จจาก Worker
+    </div>
+  ) : (
+    <>
+      <div className="kpi" style={{ marginBottom: 8 }}>
+        <div>
+          <div className="label">ต้องจ่ายวันนี้</div>
+          <div className="value" style={{ color: '#21d07a' }}>
+            {fmtTH(Number(summary?.money?.must_pay_today || 0))}฿
+          </div>
+        </div>
+        <span className="badge">{summary.room_no || ''}</span>
+      </div>
+
+      <ul style={{ listStyle: 'none', padding: 0, margin: '8px 0', lineHeight: 1.6 }}>
+        <li>มัดจำ: ฿{fmtTH(Number(summary?.money?.deposit || 0))}</li>
+        <li>ค่าจอง: ฿{fmtTH(Number(summary?.money?.reserve || 0))}</li>
+        <li>ค่าเช่าเดือนแรก: ฿{fmtTH(Number(summary?.money?.first_month_rent || 0))}</li>
+        {Number(summary?.money?.other_fee || 0) > 0 && (
+          <li>อื่น ๆ: ฿{fmtTH(Number(summary?.money?.other_fee || 0))}</li>
+        )}
+        <li>ชำระแล้ววันนี้: ฿{fmtTH(Number(summary?.money?.paid_today || 0))}</li>
+        <li><b>คงเหลือวันนี้: ฿{fmtTH(Number(summary?.money?.remain_today || 0))}</b></li>
+      </ul>
+
+      <div className="row" style={{ gap: 8, marginTop: 8 }}>
+        <button className="cta" onClick={handlePayCashNow} disabled={paying}>
+          {paying ? 'กำลังบันทึก…' : 'ชำระเงินสดตอนนี้'}
+        </button>
+        {/* ออปชัน: ปุ่มอื่นจาก next_actions */}
+        {(summary.next_actions || [])
+          .filter((a: any) => a.type !== 'pay_cash_now')
+          .slice(0, 2)
+          .map((a: any, i: number) => (
+            <button key={i} className="cta" onClick={() => alert('TODO: ' + a.type)}>
+              {a.label || a.type}
+            </button>
+          ))}
+      </div>
+    </>
+  )}
+</section>
             <section className="card col-4"><div className="label">ช่องทางการชำระ</div><div style={{ height: 180 }}><canvas id="piePay" /></div></section>
 
             <section className="card col-12">
