@@ -1,32 +1,38 @@
 'use client';
-import { useState } from 'react';
-import { useAgent } from '../hooks/useAgent';
-
-type ActionBtn = { type:'postback'|'open_url', label:string, action?:string, args?:any, url?:string };
+import { useEffect, useRef, useState } from 'react';
+import { useAgent, AgentAction } from '../hooks/useAgent';
 
 export default function AgentChat() {
   const { logs, sendText, clickAction } = useAgent();
   const [text, setText] = useState('');
+  const listRef = useRef<HTMLDivElement>(null);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
-    sendText(text);
+    sendText(text.trim());
     setText('');
   };
+
+  // เลื่อนอัตโนมัติลงล่างสุดเมื่อมีข้อความใหม่
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [logs]);
 
   return (
     <div className="ai-card">
       <div className="ai-card-title">🤖 NEXRoom AI Agent</div>
 
-      <div className="ai-chat">
+      <div className="ai-chat" ref={listRef}>
         {logs.map((m, i) => (
           <div key={i} className={`row ${m.from}`}>
             <div className="bubble">{m.text}</div>
             {m.actions?.length ? (
               <div className="actions">
-                {m.actions.map((b: ActionBtn, j: number) => (
-                  <button key={j} className="cta" onClick={()=>clickAction(b)}>
+                {m.actions.map((b: AgentAction, j: number) => (
+                  <button key={j} className="cta" onClick={() => clickAction(b)}>
                     {b.label}
                   </button>
                 ))}
@@ -39,7 +45,7 @@ export default function AgentChat() {
       <form className="inputbar" onSubmit={onSubmit}>
         <input
           value={text}
-          onChange={(e)=>setText(e.target.value)}
+          onChange={(e) => setText(e.target.value)}
           placeholder="พิมพ์คุยกับผู้ช่วย..."
         />
         <button type="submit">ส่ง</button>
