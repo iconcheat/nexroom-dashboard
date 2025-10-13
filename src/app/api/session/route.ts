@@ -1,12 +1,11 @@
 // src/app/api/session/route.ts
-import { NextResponse } from 'next/server';
-import { cookies, headers } from 'next/headers';
+import { NextRequest, NextResponse } from 'next/server';
 
-export async function GET() {
-  const c = cookies();
-  const h = headers();
+export async function GET(req: NextRequest) {
+  // ✅ ใช้ headers/cookies จาก req โดยตรง (ไม่ใช้ next/headers)
+  const h = req.headers;
+  const c = req.cookies;
 
-  // helper ที่ normalize type ให้เป็น string|null เสมอ
   const getCookie = (k: string): string | null => c.get(k)?.value ?? null;
   const getHeader = (k: string): string | null => h.get(k) ?? null;
 
