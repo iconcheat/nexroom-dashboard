@@ -1,51 +1,47 @@
+// src/components/AgentChat.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { useAgent } from '../hooks/useAgent';
+import { useAgent, AgentAction } from '../hooks/useAgent';
 
-/** ── Types ภายในไฟล์ (กัน build พัง และตรงกับ useAgent) ─────────────────── */
-type AgentAction =
-  | { type: 'postback'; label: string; action: string; args?: any }
-  | { type: 'open_url'; label: string; url: string };
-
-type ChatLog = {
-  from: 'user' | 'agent';
+type ChatRow = {
+  from: 'user' | 'agent' | 'system';
   text: string;
   actions?: AgentAction[];
 };
 
-/** ── Component ───────────────────────────────────────────────────────────── */
 export default function AgentChat() {
-  const { logs, sendText, clickAction, sending } = useAgent() as {
-    logs: ChatLog[];
-    sendText: (text: string) => Promise<void> | void;
-    clickAction: (a: AgentAction) => Promise<void> | void;
-    sending?: boolean;
-  };
-
+  const { logs, sendText, clickAction } = useAgent();
   const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
-  // ส่งข้อความ
+  // ส่งข้อความถึงเอเยนต์
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const msg = text.trim();
-    if (!msg) return;
-    await sendText(msg);          // -> API /api/ai/chat -> n8n -> agent
-    setText('');
-  };
-
-  // กดปุ่มแอคชัน: postback = ส่งเข้า worker, open_url = เปิดลิงก์
-  const onClickAction = async (a: AgentAction) => {
-    if (a.type === 'open_url') {
-      window.open(a.url, '_blank', 'noopener,noreferrer');
-      return;
+    if (!msg || sending) return;
+    setSending(true);
+    try {
+      await sendText(msg); // API: /api/ai/chat -> n8n -> agent
+      setText('');
+    } finally {
+      setSending(false);
     }
-    // postback: ส่งเข้า queue/worker ผ่าน hook
-    await clickAction(a);
   };
 
-  // Auto scroll ไปท้าย list เมื่อมีข้อความใหม่
+  // กดปุ่ม Action (postback/open_url)
+  const onClickAction = async (a: AgentAction) => {
+    if (sending) return;
+    setSending(true);
+    try {
+      await clickAction(a);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // เลื่อนอัตโนมัติลงล่างสุดเมื่อมีข้อความใหม่
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
@@ -54,14 +50,13 @@ export default function AgentChat() {
 
   return (
     <div className="ai-card" role="region" aria-label="NEXRoom AI Agent">
-      <div className="ai-card-title">🤖 NEXRoom AI Agent</div>
+      <div className="ai-card-title">🤖 NEXRoom AI</div>
 
       <div className="ai-chat" ref={listRef}>
-        {logs.map((m, i) => (
+        {logs.map((m: ChatRow, i: number) => (
           <div key={i} className={`row ${m.from}`}>
             <div className="bubble">{m.text}</div>
 
-            {/* ปุ่มแอคชันจาก Agent (ถ้ามี) */}
             {m.actions?.length ? (
               <div className="actions">
                 {m.actions.map((b, j) => (
@@ -80,7 +75,6 @@ export default function AgentChat() {
           </div>
         ))}
 
-        {/* สถานะกำลังส่ง */}
         {sending ? (
           <div className="row agent">
             <div className="bubble bubble-pulse" aria-live="polite">
@@ -97,12 +91,11 @@ export default function AgentChat() {
           placeholder="พิมพ์คุยกับผู้ช่วย… (เช่น “เปิดระบบจอง”, “ออกบิลรอบนี้”)"
           aria-label="พิมพ์ข้อความถึง AI Agent"
         />
-        <button type="submit" disabled={!text.trim() || !!sending}>
+        <button type="submit" disabled={!text.trim() || sending}>
           {sending ? '…' : 'ส่ง'}
         </button>
       </form>
 
-      {/* ── Style-in-JSX: โทนม่วงส้ม + เน้นอ่านง่าย ───────────────────────── */}
       <style jsx>{`
         .ai-card {
           position: relative;
@@ -170,7 +163,8 @@ export default function AgentChat() {
         .row.user {
           justify-content: flex-end;
         }
-        .row.agent {
+        .row.agent,
+        .row.system {
           justify-content: flex-start;
         }
 
@@ -181,11 +175,12 @@ export default function AgentChat() {
           line-height: 1.45;
           font-size: 14px;
           color: #0c0718;
-          background: #ffe9d6; /* ผู้ใช้: ส้มอ่อนอ่านชัด */
+          background: #ffe9d6;
           box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
           white-space: pre-wrap;
         }
-        .row.agent .bubble {
+        .row.agent .bubble,
+        .row.system .bubble {
           color: #f6f2ff;
           background: #2a1f3f;
           border: 1px solid rgba(255, 122, 0, 0.25);

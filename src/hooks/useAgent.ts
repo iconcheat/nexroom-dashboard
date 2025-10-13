@@ -1,128 +1,224 @@
+// src/hooks/useAgent.ts
 'use client';
-import { useEffect, useRef, useState } from 'react';
 
-type ActionBtn = { type:'postback'|'open_url', label:string, action?:string, args?:any, url?:string };
-type LogMsg = { from:'user'|'agent', text:string, actions?:ActionBtn[] };
+import { useCallback, useEffect, useRef, useState } from 'react';
 
-type Session = {
-  staff_id: string;
-  username?: string;
-  full_name?: string;
-  role?: string;
-  dorm_id?: string;
-  dorm_name?: string;
-  session_id?: string;
-  telegram_id?: string;
+/** ปุ่ม/แอคชันที่เอเยนต์ส่งมาให้ UI แสดง */
+export type AgentAction = {
+  type: 'postback' | 'open_url';
+  label: string;
+  action?: string;
+  args?: any;
+  url?: string;
 };
 
-export function useAgent() {
-  const [logs, setLogs] = useState<LogMsg[]>([]);
-  const sessionRef = useRef<Session | null>(null);
+/** 1 แถวในหน้าจอสนทนา */
+export type ChatRow = {
+  from: 'user' | 'agent' | 'system';
+  text: string;
+  actions?: AgentAction[];
+};
 
-  // 1) โหลด session จริงหลัง login
-  useEffect(() => {
-    (async () => {
-      try {
-        const r = await fetch('/api/session', { cache: 'no-store' });
-        if (r.ok) {
-          const s = await r.json();
-          sessionRef.current = {
-            staff_id: s.staff_id,
-            username: s.username,
-            full_name: s.full_name,
-            role: s.role,
-            dorm_id: s.dorm_id,
-            dorm_name: s.dorm_name,
-            session_id: s.session_id,
-            telegram_id: s.telegram_id,
-          };
-        } else {
-          sessionRef.current = null; // บังคับให้เห็น error ง่าย ๆ ถ้าไม่มี session
-        }
-      } catch {
-        sessionRef.current = null;
-      }
-    })();
-  }, []);
-
-  // util
-  const push = (m: LogMsg) => setLogs(prev => [...prev, m]);
-
-  // 2) ส่งข้อความไป n8n ผ่าน NEXT api
-  const sendText = async (text: string) => {
-    push({ from: 'user', text });
-
-    const sess = sessionRef.current;
-    if (!sess?.staff_id) {
-      push({ from: 'agent', text: '❗ ยังไม่มี session (staff_id) — กรุณาเข้าสู่ระบบใหม่' });
-      return;
+type AgentReply =
+  | {
+      ok: true;
+      message?: string;
+      reply?: string;
+      actions?: AgentAction[];
+      mode?: 'queued' | 'fast';
+      lane?: string;
+      job_id?: string;
+      meta?: any;
     }
-
-    const body = {
-      message: text,
-      context: {
-        dorm_id:   sess.dorm_id,
-        dorm_name: sess.dorm_name,
-        staff_id:  sess.staff_id,
-        username:  sess.username,
-        full_name: sess.full_name,
-        role:      sess.role,
-        session_id:sess.session_id,
-        telegram_id:sess.telegram_id,
-        channel:   'dashboard',
-        locale:    'th-TH',
-      },
+  | {
+      ok: false;
+      error?: string;
+      message?: string;
     };
 
-    const res = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-
-    if (!res.ok) {
-      push({ from: 'agent', text: `❌ ส่งไม่สำเร็จ (${res.status})` });
-      return;
+type SessionMe =
+  | {
+      ok: true;
+      session_id: string;
+      staff_id: string;
+      username: string | null;
+      full_name: string | null;
+      role: string;
+      dorm_id: string;
+      dorm_name: string | null;
+      telegram_id: string | null;
+      expires_at?: string;
     }
+  | { ok: false; [k: string]: any };
 
-    const data = await res.json();
-    push({ from: 'agent', text: data.reply || data.message || 'โอเค', actions: data.actions || [] });
-  };
-
-  const clickAction = async (btn: ActionBtn) => {
-    if (btn.type === 'open_url' && btn.url) {
-      window.open(btn.url, '_blank');
-      return;
+/** hook หลัก: ใช้ใน <AgentChat/> */
+export function useAgent() {
+  const [logs, setLogs] = useState<ChatRow[]>(() => {
+    // พก state เบา ๆ ใน localStorage กันหน้ากระพริบ (ไม่จำเป็นต้องมีก็ได้)
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem('nxr_agent_logs');
+      return raw ? (JSON.parse(raw) as ChatRow[]) : [];
+    } catch {
+      return [];
     }
-    // ส่งปุ่มเป็น postback กลับไป API เดิม
-    const sess = sessionRef.current;
-    if (!sess?.staff_id) {
-      push({ from: 'agent', text: '❗ ยังไม่มี session — กรุณาเข้าสู่ระบบใหม่' });
-      return;
-    }
+  });
 
-    const res = await fetch('/api/ai/chat', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        action: btn.action,
-        args: btn.args || {},
-        context: {
-          dorm_id:   sess.dorm_id,
-          dorm_name: sess.dorm_name,
-          staff_id:  sess.staff_id,
-          username:  sess.username,
-          full_name: sess.full_name,
-          role:      sess.role,
-          session_id:sess.session_id,
-          channel:   'dashboard',
-          locale:    'th-TH',
+  const sessionRef = useRef<SessionMe | null>(null);
+  const loadingSession = useRef(false);
+
+  // บันทึกลง localStorage ทุกครั้งที่มีการเปลี่ยนแปลง
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('nxr_agent_logs', JSON.stringify(logs));
+    }
+  }, [logs]);
+
+  /** โหลด session/me ครั้งแรก (ดึง staff_id, dorm_id, role ฯลฯ) */
+  const ensureSession = useCallback(async () => {
+    if (sessionRef.current || loadingSession.current) return sessionRef.current;
+    loadingSession.current = true;
+    try {
+      const r = await fetch('/api/session/me', { cache: 'no-store' });
+      const j: SessionMe = await r.json().catch(() => ({ ok: false }));
+      sessionRef.current = j;
+      if (!j.ok) {
+        setLogs((prev) => [
+          ...prev,
+          {
+            from: 'system',
+            text: '❗ ยังไม่มี session (staff_id) — กรุณาเข้าสู่ระบบใหม่',
+          },
+        ]);
+      }
+      return j;
+    } catch (e: any) {
+      setLogs((prev) => [
+        ...prev,
+        {
+          from: 'system',
+          text: `❌ โหลดเซสชันไม่สำเร็จ: ${String(e?.message || e)}`,
         },
-      }),
-    });
-    const data = await res.json().catch(()=>({message:'เกิดข้อผิดพลาด'}));
-    push({ from: 'agent', text: data.reply || data.message || 'โอเค', actions: data.actions || [] });
-  };
+      ]);
+      return null;
+    } finally {
+      loadingSession.current = false;
+    }
+  }, []);
+
+  /** แปลงผลจาก /api/ai/chat ให้เป็น ChatRow */
+  const pushAgentReply = useCallback((res: AgentReply) => {
+    if (!res) return;
+    if ('ok' in res && !res.ok) {
+      setLogs((prev) => [
+        ...prev,
+        { from: 'agent', text: res.message || `❌ ${res.error || 'เกิดข้อผิดพลาด'}` },
+      ]);
+      return;
+    }
+    const msg =
+      (res as any).message || (res as any).reply || 'ต้องการให้ช่วยอะไรต่อครับ?';
+    const actions = (res as any).actions || [];
+    setLogs((prev) => [...prev, { from: 'agent', text: msg, actions }]);
+  }, []);
+
+  /** ผู้ใช้พิมพ์ → ส่งข้อความไปเอเยนต์ */
+  const sendText = useCallback(
+    async (text: string) => {
+      setLogs((prev) => [...prev, { from: 'user', text }]);
+
+      const sess = await ensureSession();
+      if (!sess || !('ok' in sess) || !sess.ok) return;
+
+      // ตัว route /api/ai/chat จะอ่าน cookie เองอยู่แล้ว
+      // ส่งเฉพาะ message; context เพิ่มเติมไม่ต้องย้ำ
+      try {
+        const r = await fetch('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            context: {
+              // ไม่จำเป็นต้องครบทุกฟิลด์ เพราะฝั่ง API จะอ่านจาก cookie/header ซ้ำ
+              staff_id: sess.staff_id,
+              dorm_id: sess.dorm_id,
+              role: sess.role,
+              dorm_name: sess.dorm_name,
+              session_id: sess.session_id,
+            },
+          }),
+        });
+        const j: AgentReply = await r.json().catch(() => ({
+          ok: false,
+          error: 'bad_json',
+        }));
+        pushAgentReply(j);
+      } catch (e: any) {
+        setLogs((prev) => [
+          ...prev,
+          { from: 'agent', text: `❌ ส่งข้อความไม่สำเร็จ: ${String(e?.message || e)}` },
+        ]);
+      }
+    },
+    [ensureSession, pushAgentReply],
+  );
+
+  /** ผู้ใช้กดปุ่มแอคชันจากเอเยนต์ */
+  const clickAction = useCallback(
+    async (btn: AgentAction) => {
+      // แสดงในแชทก่อนว่าผู้ใช้กดอะไร
+      setLogs((prev) => [...prev, { from: 'user', text: `• ${btn.label}` }]);
+
+      if (btn.type === 'open_url' && btn.url) {
+        // เปิดแท็บใหม่ + แจ้งในห้องแชท
+        try {
+          window.open(btn.url, '_blank', 'noopener,noreferrer');
+        } catch {}
+        setLogs((prev) => [
+          ...prev,
+          { from: 'agent', text: '⚙️ เปิดหน้าทำงานให้แล้วในแท็บใหม่' },
+        ]);
+        return;
+      }
+
+      // postback → ให้ /api/ai/chat เป็น gateway ไป n8n
+      if (btn.type === 'postback' && btn.action) {
+        const sess = await ensureSession();
+        if (!sess || !('ok' in sess) || !sess.ok) return;
+
+        try {
+          const r = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              action: btn.action,
+              args: btn.args || {},
+              context: {
+                staff_id: sess.staff_id,
+                dorm_id: sess.dorm_id,
+                role: sess.role,
+                session_id: sess.session_id,
+              },
+            }),
+          });
+          const j: AgentReply = await r.json().catch(() => ({
+            ok: false,
+            error: 'bad_json',
+          }));
+          pushAgentReply(j);
+        } catch (e: any) {
+          setLogs((prev) => [
+            ...prev,
+            {
+              from: 'agent',
+              text: `❌ เรียกใช้งานไม่สำเร็จ: ${String(e?.message || e)}`,
+            },
+          ]);
+        }
+      }
+    },
+    [ensureSession, pushAgentReply],
+  );
 
   return { logs, sendText, clickAction };
 }

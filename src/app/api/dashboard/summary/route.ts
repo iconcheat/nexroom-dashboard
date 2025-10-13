@@ -3,71 +3,95 @@ import { NextResponse } from 'next/server';
 import { cookies, headers } from 'next/headers';
 import { getPool } from '@/lib/db';
 
-const c = cookies();              // RequestCookies
-const h = headers();
-
 export const runtime = 'nodejs';
 
+/**
+ * คืนข้อมูลสรุปสำหรับแดชบอร์ด โดยผูกกับ dorm_id ของผู้ใช้
+ * แหล่งที่มา: ตารางใน schema app.*
+ */
 export async function GET() {
   try {
-    const c = cookies(); const h = headers();
-    const getC = (k: string) => c.get(k)?.value ?? null;
-    const getH = (k: string) => h.get(k) ?? null;
-    if (!dorm_id) return NextResponse.json({ ok:false, error:'no_dorm' }, { status: 401 });
+    // อ่าน context จาก cookie/header (รองรับทั้งสองกรณี)
+    const c = await cookies();
+    const h = await headers();
+
+    const dorm_id =
+      c.get('dorm_id')?.value ??
+      h.get('x-dorm-id') ??
+      null;
+
+    if (!dorm_id) {
+      return NextResponse.json(
+        { ok: false, error: 'no_dorm', message: 'missing dorm_id' },
+        { status: 401 },
+      );
+    }
 
     const pool = getPool();
 
-    // ตัวอย่าง query ที่เบาและชัด (ปรับชื่อตาราง/คอลัมน์ให้ตรง schema จริง)
-    const q1 = `
-      SELECT
-        COUNT(*)::int      AS total_rooms,
-        COUNT(*) FILTER (WHERE status='vacant')::int  AS vacant,
-        COUNT(*) FILTER (WHERE status='reserved')::int AS reserved,
-        COUNT(*) FILTER (WHERE status='occupied')::int AS occupied
-      FROM app.rooms WHERE dorm_id = $1;
+    // ===== ตัวอย่าง query สรุปที่เบาและชัด =====
+    // ปรับชื่อตาราง/คอลัมน์ให้ตรง schema จริงของคุณได้เลย
+    const q = `
+      with
+      rooms as (
+        select room_id, status
+        from app.rooms
+        where dorm_id = $1
+      ),
+      bookings as (
+        select booking_id, room, status
+        from app.bookings
+        where dorm_id = $1
+      ),
+      invoices as (
+        select invoice_id, status, due_date
+        from app.invoices
+        where dorm_id = $1
+      ),
+      checkins_today as (
+        select checkin_id
+        from app.checkins
+        where dorm_id = $1
+          and date_trunc('day', planned_date) = date_trunc('day', now())
+      ),
+      work_orders_open as (
+        select request_id
+        from app.maintenance_requests
+        where dorm_id = $1 and status in ('open','in_progress')
+      )
+      select
+        (select count(*)        from rooms)                                   as total_rooms,
+        (select count(*)        from rooms where status = 'vacant')           as vacant,
+        (select count(*)        from rooms where status = 'occupied')         as occupied,
+        (select count(*)        from bookings where status = 'reserved')      as reserved,
+        (select count(*)        from invoices where status = 'pending'
+           and (due_date is null or due_date <= now()))                      as due_invoices,
+        (select count(*)        from checkins_today)                          as moveins_today,
+        (select count(*)        from work_orders_open)                        as work_orders_open
     `;
-    const q2 = `
-      SELECT
-        COALESCE(SUM(CASE WHEN status='unpaid' THEN amount ELSE 0 END),0)::numeric AS unpaid_amount,
-        COUNT(*) FILTER (WHERE status='unpaid')::int AS unpaid_invoices
-      FROM app.invoices
-      WHERE dorm_id = $1 AND period = to_char(now(),'YYYY-MM');  -- ตัวอย่าง: รอบเดือนนี้
-    `;
-    const q3 = `
-      SELECT
-        COALESCE(SUM(CASE WHEN paid_at::date = CURRENT_DATE THEN amount ELSE 0 END),0)::numeric AS paid_today
-      FROM app.payments WHERE dorm_id = $1;
-    `;
-    const [r1, r2, r3] = await Promise.all([
-      pool.query(q1, [dorm_id]),
-      pool.query(q2, [dorm_id]),
-      pool.query(q3, [dorm_id]),
-    ]);
 
-    const rooms = r1.rows[0] || {};
-    const unpaid = r2.rows[0] || {};
-    const paid = r3.rows[0] || {};
-
-    const total = Number(rooms.total_rooms || 0);
-    const occ   = Number(rooms.occupied || 0);
-    const occupancy = total ? Math.round((occ/total)*100) : 0;
+    const { rows } = await pool.query(q, [dorm_id]);
+    const summary = rows[0] ?? {
+      total_rooms: 0,
+      vacant: 0,
+      occupied: 0,
+      reserved: 0,
+      due_invoices: 0,
+      moveins_today: 0,
+      work_orders_open: 0,
+    };
 
     return NextResponse.json({
       ok: true,
       dorm_id,
-      occupancy,                       // % อัตราเข้าพัก
-      rooms: {
-        total, vacant: Number(rooms.vacant||0),
-        reserved: Number(rooms.reserved||0),
-        occupied: occ,
-      },
-      billing: {
-        unpaid_amount: Number(unpaid.unpaid_amount || 0),
-        unpaid_invoices: Number(unpaid.unpaid_invoices || 0),
-        paid_today: Number(paid.paid_today || 0),
-      },
+      summary,
+      // เผื่อหน้า UI อยากแสดง timestamp
+      generated_at: new Date().toISOString(),
     });
-  } catch (err:any) {
-    return NextResponse.json({ ok:false, error:String(err?.message||err) }, { status: 500 });
+  } catch (err: any) {
+    return NextResponse.json(
+      { ok: false, error: 'server_error', message: String(err?.message || err) },
+      { status: 500 },
+    );
   }
 }
