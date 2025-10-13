@@ -1,55 +1,57 @@
-// src/app/api/session/bridge/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
+import { getPool } from '@/lib/db';
 
-export const runtime = 'nodejs'; // เหมาะกับ Render
+export const runtime = 'nodejs';
 
-/**
- * /api/session/bridge?sid=<session_id>&maxAge=28800&to=/dashboard&return=json
- * - sid:     (จำเป็น) session_id ที่ n8n สร้างให้
- * - maxAge:  อายุคุกกี้เป็นวินาที (ค่าเริ่มต้น 8 ชม. = 28800)
- * - to:      path ที่จะ redirect ไปหลังตั้งคุกกี้ (default: /dashboard)
- * - return:  ถ้า = json จะไม่ redirect แต่คืน JSON แทน (ใช้ debug ได้)
- */
-export async function GET(req: NextRequest) {
+export async function GET(req: Request) {
   const url = new URL(req.url);
-
-  const sid =
-    url.searchParams.get('sid') ||
-    url.searchParams.get('session_id') ||
-    '';
-
-  const maxAge = Number(
-    url.searchParams.get('maxAge') ||
-      url.searchParams.get('max') ||
-      28800 // 8 ชั่วโมง
-  );
-
+  const sid = url.searchParams.get('sid') || '';
+  const maxAge = Number(url.searchParams.get('maxAge') || url.searchParams.get('max') || 28800);
   const to = url.searchParams.get('to') || '/dashboard';
-  const wantsJson = (url.searchParams.get('return') || '').toLowerCase() === 'json';
 
   if (!sid) {
-    return NextResponse.json({ ok: false, error: 'missing_sid' }, { status: 400 });
+    return NextResponse.json({ ok:false, error:'missing_sid' }, { status:400 });
   }
 
-  // สร้าง base url สำหรับ redirect (รองรับ localhost/Render)
-  const host = req.headers.get('host') || '';
-  const isLocal = host.includes('localhost') || host.startsWith('127.0.0.1');
-  const proto = isLocal ? 'http' : 'https';
-  const base = `${proto}://${host}`;
-
-  // เตรียม response: redirect หรือ JSON
-  const res = wantsJson
-    ? NextResponse.json({ ok: true, setCookie: true, sid, maxAge, to })
-    : NextResponse.redirect(`${base}${to}`, { status: 303 });
-
-  // ตั้งคุกกี้ session (httpOnly)
+  // 1) ตั้ง nxr_session ก่อน
+  const res = NextResponse.redirect(to, { status: 303 });
   res.cookies.set('nxr_session', sid, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: !isLocal, // production ให้ secure=true
-    path: '/',
-    maxAge,
+    httpOnly: true, sameSite: 'lax', secure: true, path: '/', maxAge,
   });
+
+  // 2) ดึงข้อมูลผู้ใช้จาก DB แล้วตั้ง cookie เพิ่ม
+  try {
+    const pool = getPool();
+    const q = `
+      SELECT s.session_id, s.staff_id, s.dorm_id, s.is_valid, s.expires_at,
+             u.username, u.full_name, u.role, u.telegram_id, u.plan_name
+      FROM app.staff_sessions s
+      JOIN app.staff_users  u ON s.staff_id = u.staff_id
+      WHERE s.session_id = $1
+      LIMIT 1;
+    `;
+    const { rows } = await pool.query(q, [sid]);
+    const v = rows[0];
+
+    if (v && v.is_valid) {
+      const c = [
+        ['staff_id',   String(v.staff_id || '')],
+        ['dorm_id',    String(v.dorm_id || '')],
+        ['username',   String(v.username || '')],
+        ['role',       String(v.role || 'viewer')],
+        ['telegram_id',String(v.telegram_id || '')],
+        ['plan_name',  String(v.plan_name || '')],
+      ] as const;
+
+      for (const [k, val] of c) {
+        res.cookies.set(k, val, { httpOnly:false, sameSite:'lax', secure:true, path:'/', maxAge });
+      }
+    }
+  } catch (e) {
+    // ไม่ให้ redirect ล่มเพราะตั้ง cookie เพิ่มไม่สำเร็จ
+    console.error('bridge extra cookies error:', e);
+  }
 
   return res;
 }
