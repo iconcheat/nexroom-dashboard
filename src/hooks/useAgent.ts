@@ -32,22 +32,33 @@ export function useAgent() {
   }, []);
 
   const sendText = async (text: string) => {
-    setLogs((prev) => [...prev, { from:'user', text }]);
-    setSending(true);
-    try {
-      const r = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'content-type':'application/json' },
-        body: JSON.stringify({ message: text }),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (data?.message) {
-        setLogs((prev) => [...prev, { from:'agent', text: String(data.message), actions: data.actions || [] }]);
-      }
-    } finally {
-      setSending(false);
+  setLogs((prev) => [...prev, { from:'user', text }]);
+  setSending(true);
+  try {
+    // 👇 ดึงข้อมูล context จาก localStorage (ที่ได้จาก /api/session/me)
+    const staff_id = localStorage.getItem('staff_id');
+    const dorm_id  = localStorage.getItem('dorm_id');
+
+    const r = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'content-type':'application/json' },
+      body: JSON.stringify({
+        message: text,
+        context: { staff_id, dorm_id },
+      }),
+    });
+
+    const data = await r.json().catch(() => ({}));
+    if (data?.message) {
+      setLogs((prev) => [
+        ...prev,
+        { from:'agent', text: String(data.message), actions: data.actions || [] },
+      ]);
     }
-  };
+  } finally {
+    setSending(false);
+  }
+};
 
   const clickAction = async (a: AgentAction) => {
     if (a.type === 'open_url') {
@@ -57,10 +68,17 @@ export function useAgent() {
     setLogs((prev) => [...prev, { from:'user', text:`▶ ${a.label}` }]);
     setSending(true);
     try {
+      const staff_id = localStorage.getItem('staff_id');
+      const dorm_id  = localStorage.getItem('dorm_id');
+
       const r = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'content-type':'application/json' },
-        body: JSON.stringify({ action: a.action, args: a.args || {} }),
+        body: JSON.stringify({
+          action: a.action,
+          args: a.args || {},
+          context: { staff_id, dorm_id },
+        }),
       });
       const data = await r.json().catch(() => ({}));
       if (data?.message) {
