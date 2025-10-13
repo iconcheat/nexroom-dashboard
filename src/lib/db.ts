@@ -1,46 +1,87 @@
 // src/lib/db.ts
-import { Pool } from 'pg';
+import pg from 'pg';
 
-/**
- * ใช้ตัวแปร DATABASE_URL จาก .env หรือ Render Environment
- * ตัวอย่าง: postgres://username:password@host:5432/dbname
- */
-const connectionString = process.env.DATABASE_URL;
+/** เก็บ Pool ไว้บน global เพื่อกันสร้างซ้ำตอน HMR/SSR */
+type GlobalWithPgPool = typeof globalThis & { __NXR_PG_POOL?: pg.Pool };
 
-if (!connectionString) {
-  throw new Error('❌ DATABASE_URL is not defined in environment variables');
-}
+function getPoolConfig(): pg.PoolConfig {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) {
+    throw new Error('[db] missing env DATABASE_URL');
+  }
 
-// ใช้ global variable ป้องกันการสร้าง pool ซ้ำใน dev mode
-let globalPool: Pool | undefined = (global as any)._pgPool;
+  // บน Render/Prod ต้องเปิด SSL (แต่ไม่ตรวจ cert)
+  const isLocal =
+    connectionString.includes('localhost') ||
+    connectionString.includes('127.0.0.1');
 
-if (!globalPool) {
-  globalPool = new Pool({
+  return {
     connectionString,
-    ssl: {
-      rejectUnauthorized: false, // Render.com ต้องใช้แบบนี้
-    },
-    max: 10,          // จำกัดจำนวน connection พร้อมกัน
-    idleTimeoutMillis: 30000, // ปล่อย connection ทิ้งหลังว่าง 30 วิ
-  });
-  (global as any)._pgPool = globalPool;
+    ssl: isLocal ? false : { rejectUnauthorized: false },
+    max: Number(process.env.PGPOOL_MAX ?? 5),
+    idleTimeoutMillis: Number(process.env.PGPOOL_IDLE ?? 10_000),
+    connectionTimeoutMillis: Number(process.env.PGCONNECT_TIMEOUT ?? 10_000),
+  };
 }
 
-export const pool = globalPool;
+/** คืน singleton pg.Pool */
+export function getPool(): pg.Pool {
+  const g = global as GlobalWithPgPool;
+  if (g.__NXR_PG_POOL) return g.__NXR_PG_POOL;
 
-/** 
- * ฟังก์ชันเรียกใช้งาน Pool ได้จากทุกที่ในระบบ 
- * ใช้ใน route: const pool = getPool();
- */
-export function getPool(): Pool {
+  const pool = new pg.Pool(getPoolConfig());
+  pool.on('error', (err) => {
+    // ป้องกัน process ล่มเมื่อมี idle client error
+    console.error('[db] idle client error:', err);
+  });
+
+  g.__NXR_PG_POOL = pool;
   return pool;
 }
 
-/**
- * Helper สำหรับ query ง่าย ๆ (ไม่บังคับใช้)
- * ตัวอย่าง: const rows = await db.query('SELECT * FROM app.staff_users');
- */
-export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {
-  const result = await pool.query(text, params);
-  return result.rows;
+/** ใช้ query สั้น ๆ (แนะนำสำหรับ read พื้นฐาน) */
+export async function query<T = any>(
+  text: string,
+  params?: any[]
+): Promise<{ rows: T[] }> {
+  const res = await getPool().query(text, params);
+  return { rows: res.rows as T[] };
 }
+
+/** withClient สำหรับงานที่ต้องใช้ client โดยตรง */
+export async function withClient<T>(
+  fn: (client: pg.PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    return await fn(client);
+  } finally {
+    client.release();
+  }
+}
+
+/** transaction helper */
+export async function tx<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
+  return withClient(async (client) => {
+    await client.query('BEGIN');
+    try {
+      const out = await fn(client);
+      await client.query('COMMIT');
+      return out;
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    }
+  });
+}
+
+/** ปิด pool (ใช้ตอนปิดแอพ/ทดสอบ) */
+export async function endPool() {
+  const g = global as GlobalWithPgPool;
+  if (g.__NXR_PG_POOL) {
+    await g.__NXR_PG_POOL.end();
+    g.__NXR_PG_POOL = undefined;
+  }
+}
+
+export type { PoolClient } from 'pg';

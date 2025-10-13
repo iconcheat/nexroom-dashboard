@@ -1,7 +1,7 @@
 // src/app/api/session/me/route.ts
 import { cookies, headers } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { getPool } from '@/lib/db'; // ถ้าแดง ให้ดูหมายเหตุด้านล่าง
+import { getPool } from '@/lib/bus'; // ถ้าแดง ให้ดูหมายเหตุด้านล่าง
 
 export const runtime = 'nodejs';
 

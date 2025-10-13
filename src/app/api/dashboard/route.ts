@@ -1,7 +1,7 @@
 // src/app/api/dashboard/route.ts  (เฉพาะส่วน core)
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { pool } from '../../../lib/db';
+import { pool } from '../../../lib/bus';
 export async function GET() {
   try {
     const sid = (await cookies()).get('nxr_session')?.value || null;
