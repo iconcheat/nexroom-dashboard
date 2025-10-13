@@ -57,21 +57,15 @@ export default function DashboardPage() {
           const data = msg.data || msg;
           if (event === 'reserve_summary') setSummary(data);
           if (event === 'payment_done') {
-            setSummary((prev) => {
+            setSummary((prev: typeof data | null) => {
               if (!prev) return prev;
+
               const same =
-                !prev.booking_id || prev.booking_id === (data?.booking_id || prev.booking_id);
-              if (!same) return prev;
-              const paid = Number(data?.amount ?? 0);
-              const remain = Math.max(0, Number(prev.money?.remain_today ?? 0) - paid);
-              return {
-                ...prev,
-                money: {
-                  ...(prev.money || {}),
-                  paid_today: Number(prev.money?.paid_today || 0) + paid,
-                  remain_today: remain,
-                },
-              };
+                !prev.booking_id ||
+                prev.booking_id === (data?.booking_id || prev.booking_id);
+
+              if (same) return { ...prev, ...data };
+              return prev;
             });
           }
         } catch {}
