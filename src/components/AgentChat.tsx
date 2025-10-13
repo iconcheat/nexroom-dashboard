@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { useAgent, AgentAction } from '../hooks/useAgent';
+import { useAgent } from '../hooks/useAgent';
 
 export default function AgentChat() {
   const { logs, sendText, clickAction } = useAgent();
