@@ -14,8 +14,9 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok:false, error:'missing_sid' }, { status:400 });
   }
 
-  // ใช้ absolute URL กัน edge-case
-  const to = new URL(toPath, url);
+  // บังคับใช้ host เดียวกับที่เรียกเข้ามา (กัน redirect ไป localhost)
+  const currentHost = new URL(req.url).origin || 'https://nexroom-dashboard.onrender.com';
+  const to = new URL(toPath, currentHost);
 
   // ตั้ง nxr_session + session_id ก่อน (HttpOnly สำหรับ sid)
   const res = NextResponse.redirect(to, { status: 303 });
