@@ -1,28 +1,28 @@
 // src/app/api/session/route.ts
 import { NextResponse } from 'next/server';
+import { cookies, headers } from 'next/headers';
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const sid = url.searchParams.get('sid') || '';
-  const to = url.searchParams.get('to') || '/dashboard';
-  const returnJson = url.searchParams.get('return') === 'json';
-  const maxAge = Number(url.searchParams.get('maxAge') || 28800);
+export async function GET() {
+  const c = cookies();
+  const h = headers();
 
-  if (!sid) {
-    return NextResponse.json({ ok: false, error: 'missing_sid' }, { status: 400 });
+  // helper ที่ normalize type ให้เป็น string|null เสมอ
+  const getCookie = (k: string): string | null => c.get(k)?.value ?? null;
+  const getHeader = (k: string): string | null => h.get(k) ?? null;
+
+  const session = {
+    staff_id:   getCookie('staff_id')   ?? getHeader('x-staff-id'),
+    username:   getCookie('username'),
+    full_name:  getCookie('full_name'),
+    role:       getCookie('role') ?? 'staff',
+    dorm_id:    getCookie('dorm_id')    ?? getHeader('x-dorm-id'),
+    dorm_name:  getCookie('dorm_name'),
+    session_id: getCookie('session_id'),
+    telegram_id:getCookie('telegram_id'),
+  };
+
+  if (!session.staff_id) {
+    return NextResponse.json({ ok:false, error:'no_session' }, { status: 401 });
   }
-
-  const res = returnJson
-    ? NextResponse.json({ ok: true, setCookie: true, sid, maxAge, to })
-    : NextResponse.redirect(to, { status: 303 });
-
-  res.cookies.set('nxr_session', sid, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: true,
-    path: '/',
-    maxAge,
-  });
-
-  return res;
+  return NextResponse.json(session);
 }

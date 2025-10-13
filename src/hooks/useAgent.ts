@@ -1,122 +1,128 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-export type AgentAction =
-  | { type: 'postback'; label: string; action: string; args?: any }
-  | { type: 'open_url'; label: string; url: string };
+type ActionBtn = { type:'postback'|'open_url', label:string, action?:string, args?:any, url?:string };
+type LogMsg = { from:'user'|'agent', text:string, actions?:ActionBtn[] };
 
-export type AgentMessage = {
-  from: 'user' | 'agent' | 'system';
-  text: string;
-  actions?: AgentAction[];
-};
-
-type SendPayload = {
-  message: string;
-  context: {
-    staff_id: string;
-    full_name?: string | null;
-    role?: string;
-    dorm_id: string;         // ❗ ต้องมี
-    dormName?: string;
-    session_id?: string;
-    channel?: 'dashboard';
-    locale?: 'th-TH' | string;
-  };
+type Session = {
+  staff_id: string;
+  username?: string;
+  full_name?: string;
+  role?: string;
+  dorm_id?: string;
+  dorm_name?: string;
+  session_id?: string;
+  telegram_id?: string;
 };
 
 export function useAgent() {
-  const [logs, setLogs] = useState<AgentMessage[]>([]);
-  const sendingRef = useRef(false);
+  const [logs, setLogs] = useState<LogMsg[]>([]);
+  const sessionRef = useRef<Session | null>(null);
 
-  const push = (m: AgentMessage) =>
-    setLogs((prev) => [...prev, m]);
+  // 1) โหลด session จริงหลัง login
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch('/api/session', { cache: 'no-store' });
+        if (r.ok) {
+          const s = await r.json();
+          sessionRef.current = {
+            staff_id: s.staff_id,
+            username: s.username,
+            full_name: s.full_name,
+            role: s.role,
+            dorm_id: s.dorm_id,
+            dorm_name: s.dorm_name,
+            session_id: s.session_id,
+            telegram_id: s.telegram_id,
+          };
+        } else {
+          sessionRef.current = null; // บังคับให้เห็น error ง่าย ๆ ถ้าไม่มี session
+        }
+      } catch {
+        sessionRef.current = null;
+      }
+    })();
+  }, []);
 
-  async function sendText(text: string) {
-    if (sendingRef.current) return;
-    sendingRef.current = true;
+  // util
+  const push = (m: LogMsg) => setLogs(prev => [...prev, m]);
 
-    // 1) แสดงข้อความ user ก่อน
+  // 2) ส่งข้อความไป n8n ผ่าน NEXT api
+  const sendText = async (text: string) => {
     push({ from: 'user', text });
 
-    // 2) เตรียม payload (ใส่ context ให้ครบ)
-    const payload: SendPayload = {
+    const sess = sessionRef.current;
+    if (!sess?.staff_id) {
+      push({ from: 'agent', text: '❗ ยังไม่มี session (staff_id) — กรุณาเข้าสู่ระบบใหม่' });
+      return;
+    }
+
+    const body = {
       message: text,
       context: {
-        staff_id: 'manager-01',              // ใส่จริงจาก session/login
-        full_name: 'Manager',
-        role: 'viewer',
-        dorm_id: '6994dfab-98c5-4f12-bf3c-b1e371716c3c', // ❗ ห้ามว่าง
-        dormName: 'พีดี เพลส',
-        session_id: 'sess-' + Math.random().toString(36).slice(2),
-        channel: 'dashboard',
-        locale: 'th-TH',
+        dorm_id:   sess.dorm_id,
+        dorm_name: sess.dorm_name,
+        staff_id:  sess.staff_id,
+        username:  sess.username,
+        full_name: sess.full_name,
+        role:      sess.role,
+        session_id:sess.session_id,
+        telegram_id:sess.telegram_id,
+        channel:   'dashboard',
+        locale:    'th-TH',
       },
     };
 
-    try {
-      // 3) ส่งให้ API ภายในของเรา
-      const r = await fetch('/api/ai/chat', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
 
-      const data = await r.json().catch(() => ({}));
-
-      // n8n ฝั่งคุณตอบกลับได้ 2 แบบที่พบบ่อย:
-      // - { reply: 'ข้อความ...', actions: [...] }
-      // - { message: 'ข้อความ...', actions: [...] }
-      const replyText = data.reply || data.message || '…';
-      const actions: AgentAction[] = Array.isArray(data.actions) ? data.actions : [];
-
-      push({ from: 'agent', text: String(replyText || ''), actions });
-    } catch (err: any) {
-      push({ from: 'system', text: `❌ ส่งไม่สำเร็จ: ${err?.message || 'unknown error'}` });
-    } finally {
-      sendingRef.current = false;
-    }
-  }
-
-  // เมื่อผู้ใช้ “กดปุ่ม” ที่ agent ส่งมา (postback/open_url)
-  async function clickAction(btn: AgentAction) {
-    if (btn.type === 'open_url' && btn.url) {
-      window.open(btn.url, '_blank', 'noopener,noreferrer');
+    if (!res.ok) {
+      push({ from: 'agent', text: `❌ ส่งไม่สำเร็จ (${res.status})` });
       return;
     }
-    if (btn.type === 'postback') {
-      // แสดงว่าเรากดอะไร
-      push({ from: 'user', text: `▶ ${btn.label}` });
 
-      // ส่งคำสั่งลัดนี้กลับไปหา agent ผ่าน webhook ตัวเดิม
-      const payload = {
+    const data = await res.json();
+    push({ from: 'agent', text: data.reply || data.message || 'โอเค', actions: data.actions || [] });
+  };
+
+  const clickAction = async (btn: ActionBtn) => {
+    if (btn.type === 'open_url' && btn.url) {
+      window.open(btn.url, '_blank');
+      return;
+    }
+    // ส่งปุ่มเป็น postback กลับไป API เดิม
+    const sess = sessionRef.current;
+    if (!sess?.staff_id) {
+      push({ from: 'agent', text: '❗ ยังไม่มี session — กรุณาเข้าสู่ระบบใหม่' });
+      return;
+    }
+
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
         action: btn.action,
         args: btn.args || {},
-        // ใส่ context สั้น ๆ ให้ครบ
         context: {
-          staff_id: 'manager-01',
-          dorm_id: '6994dfab-98c5-4f12-bf3c-b1e371716c3c', // ❗ ห้ามว่าง
-          dormName: 'พีดี เพลส',
-          channel: 'dashboard',
-          locale: 'th-TH',
+          dorm_id:   sess.dorm_id,
+          dorm_name: sess.dorm_name,
+          staff_id:  sess.staff_id,
+          username:  sess.username,
+          full_name: sess.full_name,
+          role:      sess.role,
+          session_id:sess.session_id,
+          channel:   'dashboard',
+          locale:    'th-TH',
         },
-      };
-
-      try {
-        const r = await fetch('/api/ai/chat', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await r.json().catch(() => ({}));
-        const replyText = data.reply || data.message || '…';
-        const actions: AgentAction[] = Array.isArray(data.actions) ? data.actions : [];
-        push({ from: 'agent', text: String(replyText || ''), actions });
-      } catch (err: any) {
-        push({ from: 'system', text: `❌ คำสั่งล้มเหลว: ${err?.message || 'unknown error'}` });
-      }
-    }
-  }
+      }),
+    });
+    const data = await res.json().catch(()=>({message:'เกิดข้อผิดพลาด'}));
+    push({ from: 'agent', text: data.reply || data.message || 'โอเค', actions: data.actions || [] });
+  };
 
   return { logs, sendText, clickAction };
 }
