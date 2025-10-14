@@ -5,7 +5,13 @@ import { sseSubscribe, extractSessionId } from '@/lib/bus';
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  const sid = extractSessionId(req);
+  // 1) รับจาก query ให้สิทธิ์สูงสุด (สำหรับ dev/test หรือกรณีเปิดจากลิงก์)
+  const url = new URL(req.url);
+  const fromQuery = url.searchParams.get('session_id');
+
+  // 2) ไม่มีก็ลองจาก cookie/header
+  const sid = fromQuery || extractSessionId(req);
+
   if (!sid) {
     return new Response('missing session', { status: 401 });
   }
@@ -13,10 +19,9 @@ export async function GET(req: NextRequest) {
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
-
-      // helper เขียน sse chunk
       const write = (chunk: string) => controller.enqueue(encoder.encode(chunk));
-      // headers เปิดแล้ว
+
+      // เปิดสตรีมพร้อม event ชื่อ open
       write(`event: open\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
       // สมัครเข้า channel
@@ -26,7 +31,7 @@ export async function GET(req: NextRequest) {
         close: () => controller.close(),
       });
 
-      // keep-alive ทุก 25s (กัน proxy ปิด)
+      // keep-alive ทุก 25s
       const ping = setInterval(() => write(`event: ping\ndata: {}\n\n`), 25_000);
 
       // ปิดเมื่อ client หลุด

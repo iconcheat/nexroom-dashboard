@@ -2,11 +2,12 @@
 import type { NextRequest } from 'next/server';
 
 type Client = {
-  id: string;              // session_id
+  id: string;                    // session_id
   write: (chunk: string) => void;
   close: () => void;
 };
 
+// เก็บผู้ฟังราย session_id
 const channels = new Map<string, Set<Client>>(); // key = session_id
 
 export function sseSubscribe(sessionId: string, client: Client) {
@@ -19,28 +20,36 @@ export function sseSubscribe(sessionId: string, client: Client) {
   };
 }
 
+/** กระจาย payload ไปยังทุก client ใน session นั้น ๆ */
 export function ssePublish(sessionId: string, payload: any) {
   const set = channels.get(sessionId);
   if (!set) return;
+  // debug เล็กน้อย
+  try { console.log('[SSE:PUSH]', sessionId, Object.keys(payload || {})); } catch {}
   const data = `data: ${JSON.stringify(payload)}\n\n`;
   for (const c of set) {
-    try { c.write(data); } catch { /* ignore */ }
+    try { c.write(data); } catch { /* ignore single client error */ }
   }
 }
 
-// ช่วยอ่าน session_id จาก cookie/header
-export function extractSessionId(req: NextRequest | Request) {
-  const cookieHeader =
-    (req as any).cookies?.get?.('nxr_session')?.value ??
-    (req.headers.get('cookie') || '');
+/** อ่าน session_id จาก cookie หรือ header; รองรับทั้ง NextRequest และ fetch Request */
+export function extractSessionId(req: NextRequest | Request): string | null {
+  // 1) NextRequest.cookies().get() (App Router)
+  const fromApi =
+    // @ts-ignore – บาง runtime เป็น NextRequest ที่มี cookies.get
+    (req as any).cookies?.get?.('nxr_session')?.value as string | undefined;
+  if (fromApi && typeof fromApi === 'string') return fromApi;
 
-  if (!cookieHeader) return null;
+  // 2) raw Cookie header
+  const cookie = req.headers.get('cookie') || '';
+  if (!cookie) return null;
 
-  const sid = cookieHeader
+  const part = cookie
     .split(';')
-    .map((x: string) => x.trim())                 // 👈 เพิ่ม :string
-    .map((x: string) => x.split('='))             // 👈 เพิ่ม :string
-    .find(([k, _v]: [string, string]) => k === 'nxr_session')?.[1] || null; // 👈 ระบุ tuple type
+    .map(s => s.trim())
+    .find(s => s.startsWith('nxr_session='));
 
-  return sid;
+  if (!part) return null;
+  const [, val = ''] = part.split('=');
+  return decodeURIComponent(val) || null;
 }
