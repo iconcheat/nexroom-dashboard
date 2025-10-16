@@ -24,13 +24,13 @@ export async function POST(req: NextRequest) {
     const out = await tx(async (c) => {
       // 1) ดึงชื่อหอตรง ๆ
       const d = await c.query(
-        `SELECT COALESCE(d.display_name, d.name, d.title, d.code) AS dorm_name
-         FROM app.dorms d
-         WHERE d.dorm_id = $1::uuid
-         LIMIT 1`,
-        [dorm_id]
+        `SELECT d.dorm_name
+           FROM app.dorms d
+          WHERE d.dorm_id = $1::uuid
+          LIMIT 1`,
+         [dorm_id]
       );
-      const dorm_name = d.rows[0]?.dorm_name || null;
+      const dorm_name: string | null = d.rows[0]?.dorm_name ?? null;
 
       // 2) กันคลิกซ้ำสั้น ๆ (2 นาที) เฉพาะเงินสด + ยอดเท่ากัน
       const dup = await c.query(
