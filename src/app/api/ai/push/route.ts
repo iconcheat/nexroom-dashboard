@@ -1,13 +1,14 @@
 // src/app/api/ai/push/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
-import { ssePublish } from '@/lib/bus';     // แก้ไข: ใช้ลายเซ็นใหม่ (4 args)
+import { ssePublish } from '@/lib/bus';
 import { getPool } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
-// verify HMAC(body, AGENT_WEBHOOK_SECRET) if header x-agent-signature is provided
+/** verify HMAC(body, AGENT_WEBHOOK_SECRET) if header x-agent-signature is provided */
 function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
+  // เดิม
   if (!headerSig) return false;
   const secret = process.env.AGENT_WEBHOOK_SECRET || '';
   if (!secret) return false;
@@ -15,8 +16,9 @@ function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
   return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(headerSig));
 }
 
-// fallback หา session ล่าสุดจาก staff_id (ถ้าจำเป็น)
+/** fallback หา session ล่าสุดจาก staff_id (ถ้าจำเป็น) */
 async function findLatestSessionId(staffId: string): Promise<string | null> {
+  // เดิม
   try {
     const pool = getPool();
     const { rows } = await pool.query(
@@ -37,28 +39,25 @@ async function findLatestSessionId(staffId: string): Promise<string | null> {
 
 export async function POST(req: NextRequest) {
   try {
+    // ต้องอ่านแบบ text ก่อนเพื่อรองรับ HMAC
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
 
-    // ----- Auth (legacy / bearer / hmac) -----
+    // ----- Auth: รองรับ 3 ช่องทาง (เหมือนเดิม) -----
     const legacySecret = req.headers.get('x-nexroom-callback-secret') || '';
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     const hmacSig = req.headers.get('x-agent-signature');
 
     const okLegacy = legacySecret && legacySecret === process.env.NEXROOM_CALLBACK_SECRET;
     const okBearer = bearer && bearer === process.env.DASH_PUSH_TOKEN;
-    const okHmac   = verifyHmac(raw, hmacSig);
+    const okHmac = verifyHmac(raw, hmacSig);
 
     if (!(okLegacy || okBearer || okHmac)) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
-    // ----- หา session_id -----
-    let sessionId: string | null =
-      String(body?.session_id || '').trim()
-      || (req.headers.get('x-session-id') || '').trim()   // new: เผื่อส่งมาใน header
-      || null;
-
+    // ----- หา session_id (เหมือนเดิม) -----
+    let sessionId: string | null = String(body?.session_id || '').trim() || null;
     if (!sessionId) {
       const staffId = String(body?.staff_id || body?.context?.staff_id || '').trim();
       if (staffId) sessionId = await findLatestSessionId(staffId);
@@ -68,49 +67,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
     }
 
-    // ----- หา dorm_id (ยืดหยุ่น) -----
+    // ----- ระบุ topic + payload ที่จะส่งไปหน้าแดชบอร์ด -----
+    // // แก้ไข: ให้ยึด body.event ถ้ามี, ถ้าไม่มีและใส่ kind มาก็ map หลวมๆ ได้
+    const topic: string =
+      String(body?.event || '').trim()
+        || (String(body?.kind || '').startsWith('booking') ? 'reserve_summary' : '')
+        || 'message';
+
+    // // แก้ไข: รูปแบบ data ที่แดชบอร์ดคาดหวัง: { event, data }
+    const data = body?.data ?? body;
+
+    // ----- บันทึกลง DB (ถ้ามี dorm_id) แล้วค่อยกระจายสด -----
+    // // new: รองรับ dorm_id 3 ทาง: body.dorm_id > header x-nexroom-dorm > body.data.dorm_id
     const dormId =
-      body?.dorm_id
-      || body?.context?.dorm_id
-      || req.headers.get('x-nexroom-dorm')
-      || null;
+      String(body?.dorm_id || '').trim()
+      || String(req.headers.get('x-nexroom-dorm') || '').trim()
+      || String((body?.data ?? body)?.dorm_id || '').trim()
+      || '';
 
-    // ----- กำหนด topic (event) และ data -----
-    let topic = String(body?.event || '').trim();
-    if (!topic && typeof body?.kind === 'string') {
-      const map: Record<string,string> = {
-        'booking.completed': 'reserve_summary',
-        'payment.done':      'payment_done',
-      };
-      topic = map[body.kind] || body.kind;
+    try {
+      if (dormId) {
+        // // new: insert แบบระบุ dorm_id เสมอเพื่อผ่าน NOT NULL
+        const pool = getPool();
+        await pool.query(
+          `INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [dormId, sessionId, topic, JSON.stringify(data)],
+        );
+      } else {
+        // ถ้าไม่ได้ส่ง dorm_id มา จะ "ข้ามการ insert" เพื่อไม่ให้ 500
+        console.warn('[ai/push] skip DB insert: missing dorm_id (but will still live-push)');
+      }
+    } catch (e) {
+      // ถ้า insert พัง เราไม่ให้ 500 — log ไว้ แล้วไปต่อ live push
+      console.error('[SSE:DB] insert error', e);
     }
-    if (!topic) topic = 'message';
 
-    // เลือก data ที่จะส่งไป panel
-    const data =
-      body?.data ??
-      body?.result ??
-      {
-        // fallback ใส่บางฟิลด์ที่คุ้นเคย
-        message: body?.message ?? '',
-        actions: Array.isArray(body?.actions) ? body.actions : [],
-        booking_id: body?.booking_id ?? null,
-        dorm_id: dormId ?? null,
-        room_no: body?.room_no ?? null,
-        submission_id: body?.submission_id ?? null,
-        start_date: body?.start_date ?? null,
-        money: body?.money ?? {},
-      };
-
-    // ----- กระจาย + บันทึก -----
-    await ssePublish(dormId, sessionId, topic, data); // แก้ไข: ส่ง 4 อาร์กิวเมนต์
+    // ----- Live push ไปยัง session นี้ (in-memory) -----
+    // รูปแบบที่แดชบอร์ดฝั่ง client ใช้อยู่: { event, data }
+    ssePublish(sessionId, { event: topic, data });
 
     return new NextResponse(JSON.stringify({ ok: true }), {
       status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'cache-control': 'no-store',
-      },
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
     });
   } catch (e: any) {
     return NextResponse.json(
