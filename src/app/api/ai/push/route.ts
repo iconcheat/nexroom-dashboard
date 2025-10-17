@@ -6,7 +6,6 @@ import { getPool } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
-/** verify HMAC(body, AGENT_WEBHOOK_SECRET) if header x-agent-signature is provided */
 function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
   if (!headerSig) return false;
   const secret = process.env.AGENT_WEBHOOK_SECRET || '';
@@ -15,7 +14,6 @@ function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
   return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(headerSig));
 }
 
-/** fallback หา session ล่าสุดจาก staff_id (ถ้าจำเป็น) */
 async function findLatestSessionId(staffId: string): Promise<string | null> {
   try {
     const pool = getPool();
@@ -35,13 +33,14 @@ async function findLatestSessionId(staffId: string): Promise<string | null> {
   }
 }
 
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i; // new
+
 export async function POST(req: NextRequest) {
   try {
-    // ต้องอ่านแบบ text ก่อนเพื่อรองรับ HMAC
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
 
-    // ----- Auth (เหมือนเดิม) -----
+    // ----- Auth (ของเดิม) -----
     const legacySecret = req.headers.get('x-nexroom-callback-secret') || '';
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     const hmacSig = req.headers.get('x-agent-signature');
@@ -49,11 +48,12 @@ export async function POST(req: NextRequest) {
     const okLegacy = legacySecret && legacySecret === process.env.NEXROOM_CALLBACK_SECRET;
     const okBearer = bearer && bearer === process.env.DASH_PUSH_TOKEN;
     const okHmac = verifyHmac(raw, hmacSig);
+
     if (!(okLegacy || okBearer || okHmac)) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
-    // ----- หา session_id -----
+    // ----- session_id (ของเดิม) -----
     let sessionId: string | null = String(body?.session_id || '').trim() || null;
     if (!sessionId) {
       const staffId = String(body?.staff_id || body?.context?.staff_id || '').trim();
@@ -64,54 +64,68 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
     }
 
-    // ----- สร้างค่าที่จะ push -----
-    // แก้ไข: map ชื่อ event/kind → topic ให้ชัด
-    const topic: string =
-      String(body?.event || '').trim()
-      || (String(body?.kind || '').startsWith('booking') ? 'reserve_summary' : '')
-      || 'message';
+    // ----- หาค่า topic / data / dorm_id ให้ครบ -----
+    // แก้ไข: map event->topic ให้แน่นอน และรองรับรูปแบบเดิม
+    const topic =
+      String(body?.event || '').trim() ||
+      String(body?.kind || '').trim() ||
+      String((body?.data ?? {})?.event || '').trim() ||
+      'message'; // แก้ไข
 
-    // แก้ไข: รูปแบบ data ที่ฝั่ง client ใช้จริง = { event, data }
-    const data = body?.data ?? body;
+    // payload ที่จะส่ง/เก็บ
+    const data = (body?.data ?? body) || {}; // แก้ไข
 
-    // new: ดึง dorm_id ได้ 3 ทาง
-    const dormId =
-      String(body?.dorm_id || '').trim()
-      || String(req.headers.get('x-nexroom-dorm') || '').trim()
-      || String((body?.data ?? body)?.dorm_id || '').trim()
-      || '';
+    // เอา dorm_id จาก body.data.dorm_id -> body.dorm_id -> header
+    let dormId =
+      String((body?.data ?? body)?.dorm_id || '').trim() ||
+      String(body?.dorm_id || '').trim() ||
+      String(req.headers.get('x-nexroom-dorm') || '').trim(); // แก้ไข
 
-    // ----- อแดปเตอร์: รองรับทั้ง ssePublish(4 args) และ (2 args) -----
-    const sp = ssePublish as unknown as (...args: any[]) => any;
-
-    if (typeof sp === 'function' && sp.length >= 4) {
-      // ✅ เคสโปรเจกต์ที่คาดหวัง 4 อาร์กิวเมนต์ (DB+NOTIFY อยู่ในฟังก์ชันแล้ว)
-      // // new: ให้ dormId เป็นค่าว่างไม่ได้ → ถ้าไม่มีให้ข้ามด้วยการโยน live-only (ด้านล่าง) แทน
-      if (dormId) {
-        await sp(dormId, sessionId, topic, data); // //new
-      } else {
-        console.warn('[ai/push] ssePublish(4) requires dorm_id. Fallback to live-only push.');
-        // live-only
-        sp(sessionId, { event: topic, data }); // @ts-ignore  //new: บาง impl รองรับ 2 args ด้วย
-      }
-    } else {
-      // ✅ เคสเวอร์ชันเก่า (2 อาร์กิวเมนต์) — ใส่กันล้ม NOT NULL ให้ DB เอง
+    if (!dormId || !UUID_RX.test(dormId)) {
+      // new: ถ้าไม่มี dorm_id ที่เป็น UUID ให้ live push อย่างเดียว (กันล้ม)
+      console.warn('[ai/push] missing/invalid dorm_id. Live-only push will be used.');
       try {
-        if (dormId) {
-          const pool = getPool();
-          await pool.query(
-            `INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
-             VALUES ($1, $2, $3, $4::jsonb)`,
-            [dormId, sessionId, topic, JSON.stringify(data)],
-          );
-        } else {
-          console.warn('[ai/push] skip DB insert: missing dorm_id (live push only)');
-        }
-      } catch (e) {
-        console.error('[SSE:DB] insert error', e);
-        // ไม่ให้ 500 — ยัง live push ต่อ
+        // ฝั่งเดิม (2 args)
+        (ssePublish as any)(sessionId, { event: topic, data });
+      } catch {
+        // ฝั่งใหม่ (เผื่อมี 4 args)
+        try { (ssePublish as any)(dormId, sessionId, topic, data); } catch {}
       }
-      sp(sessionId, { event: topic, data }); // //แก้ไข: รูปแบบ payload ที่ client รออยู่
+      return NextResponse.json({ ok: true, warn: 'live_only' }, { status: 200 }); // new
+    }
+
+    // ----- บันทึกลง DB ให้ตรง schema จริง -----
+    try {
+      const pool = getPool();
+      // แก้ไข: ใส่คอลัมน์ให้ครบและ cast ตรงชนิด
+      const sql = `
+        INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
+        VALUES ($1::uuid, $2::text, $3::text, $4::jsonb)
+      `;
+      await pool.query(sql, [
+        dormId,
+        sessionId,
+        topic,
+        JSON.stringify(data), // jsonb
+      ]);
+    } catch (e) {
+      console.error('[SSE:DB] insert error', e);
+      // ถ้า insert พัง ก็ยัง live push ต่อ (ไม่ให้ user เห็นล้ม) // new
+    }
+
+    // ----- Live push ไปยัง client ตอนนี้ -----
+    try {
+      // รองรับ signature เก่า (2 arg) และใหม่ (4 arg)
+      const sp = ssePublish as unknown as (...args: any[]) => any;
+      if (sp.length >= 4) {
+        // new: ถ้าโปรเจ็กต์คุณมีเวอร์ชัน 4 args
+        sp(dormId, sessionId, topic, data); // new
+      } else {
+        // เก่าของคุณ (2 args) ยังทำงานต่อ
+        sp(sessionId, { event: topic, data }); // แก้ไข
+      }
+    } catch (e) {
+      console.error('[SSE:push] live push error', e);
     }
 
     return new NextResponse(JSON.stringify({ ok: true }), {
