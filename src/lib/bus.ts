@@ -68,9 +68,9 @@ export async function ssePublish(
       [dormId, sessionId, topic, data]
     );
     // แจ้ง instance อื่น ๆ ถ้ามี listener
-    await pool.query(`NOTIFY sse_notify, $1`, [
-      JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic }),
-    ]);
+    const notifyPayload = JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic })
+      .replace(/'/g, "''");  // escape single quote
+    await pool.query(`NOTIFY sse_notify, '${notifyPayload}'`);
   } catch (e) {
     console.error('[SSE:DB]', e);
   }
