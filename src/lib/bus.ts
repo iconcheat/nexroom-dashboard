@@ -1,6 +1,6 @@
 // src/lib/bus.ts
 import type { NextRequest } from 'next/server';
-import { getPool } from '@/lib/db';   // new — สำหรับบันทึก event ลง DB (multi-tenant)
+import { getPool } from '@/lib/db';   // สำหรับบันทึก event ลง DB
 
 // =======================================================
 // ===== In-memory channel (ต่อ instance) =====
@@ -38,24 +38,36 @@ export async function ssePublish(
   data: any
 ): Promise<void> {
   // --- 1) push event ไปยัง client ที่เปิดอยู่ใน instance นี้ ---
-  const set = channels.get(sessionId);
-  if (set) {
-    const payload = { event: topic, data };
-    const packet = `data: ${JSON.stringify(payload)}\n\n`;
-    for (const c of set) {
+  const payload = { event: topic, data };
+  const packet = `data: ${JSON.stringify(payload)}\n\n`;
+
+  // ส่งถึง session
+  const setSession = channels.get(sessionId);
+  if (setSession) {
+    for (const c of setSession) {
       try { c.write(packet); } catch {}
     }
   }
 
-  // --- 2) (optional) บันทึก event ลงฐานข้อมูล เพื่อใช้ replay/notify ---
+  // ส่งถึง dorm (ถ้ามี listener)
+  const setDorm = channels.get(dormId);
+  if (setDorm) {
+    for (const c of setDorm) {
+      try { c.write(packet); } catch {}
+    }
+  }
+
+  // --- 2) บันทึก event ลงฐานข้อมูล เพื่อใช้ replay/notify ---
   try {
     const pool = getPool();
     await pool.query(
       `INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
-       VALUES ($1, $2, $3, $4::jsonb)`,
-      [dormId, sessionId, topic, JSON.stringify(data)]
+       VALUES ($1::uuid, $2::text, $3::text, $4::jsonb)
+       ON CONFLICT (dorm_id, session_id, topic)
+       DO UPDATE SET payload = EXCLUDED.payload, created_at = now()`,
+      [dormId, sessionId, topic, data]
     );
-    // ถ้ามี trigger LISTEN/NOTIFY ใช้แจ้ง instance อื่น ๆ ได้ด้วย
+    // แจ้ง instance อื่น ๆ ถ้ามี listener
     await pool.query(`NOTIFY sse_notify, $1`, [
       JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic }),
     ]);
