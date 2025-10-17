@@ -46,54 +46,75 @@ export default function DashboardPage() {
   };
 
   // ===== SSE =====
-  useEffect(() => {
-    let es: EventSource | null = null;
-    let retry = 0;
+useEffect(() => {
+  let es: EventSource | null = null;
+  let retry = 0;
 
-    // new: helper เอา session id จาก cookie; ถ้าไม่มีก็ random แล้วเซ็ต cookie non-HttpOnly
-    const getOrCreateSession = () => {
-      const m = document.cookie.match(/(?:^|;\s*)nxr_session=([^;]+)/);
-      if (m?.[1]) return decodeURIComponent(m[1]);
-      const sid = 'sess-' + Math.random().toString(36).slice(2);
-      // หมดอายุ 7 วัน (dev); โปรดเปลี่ยนเป็นออกจาก server ในโปรดักชัน
-      document.cookie = `nxr_session=${encodeURIComponent(sid)}; path=/; max-age=${7*24*3600}`;
-      return sid;
+  const getOrCreateSession = () => {
+    const m = document.cookie.match(/(?:^|;\s*)nxr_session=([^;]+)/);
+    if (m?.[1]) return decodeURIComponent(m[1]);
+    const sid = 'sess-' + Math.random().toString(36).slice(2);
+    document.cookie = `nxr_session=${encodeURIComponent(sid)}; path=/; max-age=${7*24*3600}`;
+    return sid;
+  };
+  const sessionId = getOrCreateSession();
+
+  const connect = () => {
+    es = new EventSource(`/api/ai/events?session_id=${encodeURIComponent(sessionId)}`);
+
+    // 1) รองรับ “default message” แบบเดิม
+    es.onmessage = (ev) => {
+      try {
+        const msg  = JSON.parse(ev.data || '{}');
+        const evt  = msg.event || msg?.data?.event;
+        const data = msg.data || msg;
+        if (!evt) return;
+
+        if (evt === 'reserve_summary') setSummary(data);
+        if (evt === 'payment_done') {
+          setSummary((prev: any) => {
+            if (!prev) return data;
+            const same = !prev?.booking_id || prev?.booking_id === (data?.booking_id || prev?.booking_id);
+            return same ? { ...prev, ...data } : prev;
+          });
+        }
+      } catch (e) {
+        // swallow
+      }
     };
-    const sessionId = getOrCreateSession();
 
-    const connect = () => {
-      es = new EventSource(`/api/ai/events?session_id=${encodeURIComponent(sessionId)}`);
-      es.onmessage = (ev) => {
-        try {
-          const msg = JSON.parse(ev.data || '{}');
-          const event = msg.event || msg?.data?.event;
-          const data = msg.data || msg;
-          if (event === 'reserve_summary') setSummary(data);
-          if (event === 'payment_done') {
-            setSummary((prev: typeof data | null) => {
-              if (!prev) return prev;
-
-              const same =
-                !prev.booking_id ||
-                prev.booking_id === (data?.booking_id || prev.booking_id);
-
-              if (same) return { ...prev, ...data };
-              return prev;
-            });
-          }
-        } catch {}
-      };
-      es.onerror = () => {
-        es?.close();
-        const backoff = Math.min(1000 * Math.pow(2, retry++), 15000);
-        setTimeout(connect, backoff);
-      };
+    // 2) รองรับ “named SSE events” (รูปที่เซิร์ฟเวอร์ส่งจริง)
+    const onReserve = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data || '{}');
+        setSummary(data);
+      } catch {}
     };
-    connect();
-    return () => {
+    const onPaid = (ev: MessageEvent) => {
+      try {
+        const data = JSON.parse(ev.data || '{}');
+        setSummary((prev: any) => {
+          if (!prev) return data;
+          const same = !prev?.booking_id || prev?.booking_id === (data?.booking_id || prev?.booking_id);
+          return same ? { ...prev, ...data } : prev;
+        });
+      } catch {}
+    };
+
+    es.addEventListener('reserve_summary', onReserve);
+    es.addEventListener('payment_done', onPaid);
+
+    es.onerror = () => {
+      // cleanup แล้ว retry แบบ backoff
       es?.close();
+      const backoff = Math.min(1000 * Math.pow(2, retry++), 15000);
+      setTimeout(connect, backoff);
     };
-  }, [dormId]);
+  };
+
+  connect();
+  return () => { es?.close(); };
+}, []);
 
   // ===== Background Floating Particles =====
   useEffect(() => {
