@@ -33,20 +33,26 @@ export async function GET(req: NextRequest) {
     if (dormId) {
       try {
         const d = await pool.query(
-          `SELECT name FROM app.dorms WHERE dorm_id = $1 LIMIT 1`,
+          `SELECT COALESCE(name, dorm_name) AS dorm_name
+             FROM app.dorms
+            WHERE dorm_id = $1
+            LIMIT 1`,
           [dormId]
         );
-        dormName = d.rows[0]?.name ?? null;
+        dormName = d.rows[0]?.dorm_name ?? null;
       } catch { /* ตาราง/คอลัมน์อาจไม่มี */ }
     }
 
     if (staffId) {
       try {
         const u = await pool.query(
-          `SELECT display_name FROM app.staffs WHERE staff_id = $1 LIMIT 1`,
+          `SELECT COALESCE(display_name, username) AS user_name
+             FROM app.staffs
+            WHERE staff_id = $1
+            LIMIT 1`,
           [staffId]
         );
-        userName = u.rows[0]?.display_name ?? null;
+        userName = u.rows[0]?.user_name ?? null;
       } catch { /* ตาราง/คอลัมน์อาจไม่มี */ }
     }
   } catch (e) {

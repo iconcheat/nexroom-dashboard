@@ -10,7 +10,8 @@ export default function DashboardPage() {
   // ===== State / Context =====
   const [summary, setSummary] = useState<any | null>(null);
   const [paying, setPaying] = useState(false);
-  const dormId = 'PD-PLACE';
+  const [dormName, setDormName] = useState<string>('PD Place');
+  const [userName, setUserName] = useState<string>('Manager');
   const CASH_WEBHOOK = '/api/payments/cash';
   const fmtTH = (n: number) =>
     (typeof n === 'number' ? n.toLocaleString('th-TH') : String(n ?? ''));
@@ -45,24 +46,28 @@ export default function DashboardPage() {
     }
   };
 
-  // ===== SSE =====
+  // ===== SSE + initial preload =====
 useEffect(() => {
+  // 1) preload ข้อมูลจาก DB ด้วย session_id ในคุกกี้ (Server จะอ่านเอง)
+  (async () => {
+    try {
+      const r = await fetch('/api/dashboard/initial', { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j?.dorm_name) setDormName(j.dorm_name);
+        if (j?.user_name) setUserName(j.user_name);
+        if (j?.last_reserve_summary) setSummary(j.last_reserve_summary);
+      }
+    } catch {}
+  })();
+
+  // 2) ต่อ SSE โดย “ไม่” ใส่ ?session_id=...
   let es: EventSource | null = null;
   let retry = 0;
-
-  const getOrCreateSession = () => {
-    const m = document.cookie.match(/(?:^|;\s*)nxr_session=([^;]+)/);
-    if (m?.[1]) return decodeURIComponent(m[1]);
-    const sid = 'sess-' + Math.random().toString(36).slice(2);
-    document.cookie = `nxr_session=${encodeURIComponent(sid)}; path=/; max-age=${7*24*3600}`;
-    return sid;
-  };
-  const sessionId = getOrCreateSession();
-
   const connect = () => {
-    es = new EventSource(`/api/ai/events?session_id=${encodeURIComponent(sessionId)}`);
+    es = new EventSource('/api/ai/events');
 
-    // 1) รองรับ “default message” แบบเดิม
+    // default message (กรณี backend ส่งรูปแบบเก่า)
     es.onmessage = (ev) => {
       try {
         const msg  = JSON.parse(ev.data || '{}');
@@ -78,19 +83,14 @@ useEffect(() => {
             return same ? { ...prev, ...data } : prev;
           });
         }
-      } catch (e) {
-        // swallow
-      }
-    };
-
-    // 2) รองรับ “named SSE events” (รูปที่เซิร์ฟเวอร์ส่งจริง)
-    const onReserve = (ev: MessageEvent) => {
-      try {
-        const data = JSON.parse(ev.data || '{}');
-        setSummary(data);
       } catch {}
     };
-    const onPaid = (ev: MessageEvent) => {
+
+    // named SSE events (รูปแบบใหม่)
+    es.addEventListener('reserve_summary', (ev: MessageEvent) => {
+      try { setSummary(JSON.parse(ev.data || '{}')); } catch {}
+    });
+    es.addEventListener('payment_done', (ev: MessageEvent) => {
       try {
         const data = JSON.parse(ev.data || '{}');
         setSummary((prev: any) => {
@@ -99,13 +99,9 @@ useEffect(() => {
           return same ? { ...prev, ...data } : prev;
         });
       } catch {}
-    };
-
-    es.addEventListener('reserve_summary', onReserve);
-    es.addEventListener('payment_done', onPaid);
+    });
 
     es.onerror = () => {
-      // cleanup แล้ว retry แบบ backoff
       es?.close();
       const backoff = Math.min(1000 * Math.pow(2, retry++), 15000);
       setTimeout(connect, backoff);
@@ -212,9 +208,9 @@ useEffect(() => {
               <button className="btn-orange neon-rounded shadow-glow">🧾 ใบแจ้งหนี้</button>
             </div>
             <div className="top-row chips">
-              <div className="panel-chip glass-neon neon-rounded shine-run">หอพัก: PD Place</div>
+              <div className="panel-chip glass-neon neon-rounded shine-run">หอพัก: {dormName}</div>
               <div className="panel-chip glass-neon neon-rounded shine-run">รอบบิล: 2025-10</div>
-              <div className="panel-chip glass-neon neon-rounded shine-run">ผู้ใช้: Manager</div>
+              <div className="panel-chip glass-neon neon-rounded shine-run">ผู้ใช้: {userName}</div>
             </div>
           </div>
 
