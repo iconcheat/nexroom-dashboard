@@ -6,16 +6,24 @@ import { getPool } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
-/** verify HMAC(body, AGENT_WEBHOOK_SECRET) if header x-agent-signature is provided */
+/* ==========================================================
+   1️⃣ ตรวจสอบลายเซ็น HMAC (สำหรับ webhook จาก Agent)
+   ========================================================== */
 function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
   if (!headerSig) return false;
   const secret = process.env.AGENT_WEBHOOK_SECRET || '';
   if (!secret) return false;
   const calc = crypto.createHmac('sha256', secret).update(bodyRaw).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(headerSig));
+  try {
+    return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(headerSig));
+  } catch {
+    return false;
+  }
 }
 
-/** fallback หา session ล่าสุดจาก staff_id (ถ้าจำเป็น) */
+/* ==========================================================
+   2️⃣ fallback หา session ล่าสุดจาก staff_id (ถ้าไม่มีส่งมา)
+   ========================================================== */
 async function findLatestSessionId(staffId: string): Promise<string | null> {
   try {
     const pool = getPool();
@@ -30,21 +38,24 @@ async function findLatestSessionId(staffId: string): Promise<string | null> {
       [staffId],
     );
     return rows[0]?.session_id ?? null;
-  } catch {
+  } catch (err) {
+    console.error('[findLatestSessionId] error:', err);
     return null;
   }
 }
 
+/* ==========================================================
+   3️⃣ main: push event → ส่งเข้าระบบ SSE (Postgres version)
+   ========================================================== */
 export async function POST(req: NextRequest) {
   try {
-    // ต้องอ่านแบบ text ก่อนเพื่อรองรับ HMAC
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
 
-    // ----- Auth: รองรับ 3 ช่องทาง -----
+    // ----- Auth -----
     const legacySecret = req.headers.get('x-nexroom-callback-secret') || '';
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-    const hmacSig = req.headers.get('x-agent-signature'); // ถ้ามีจะตรวจ HMAC
+    const hmacSig = req.headers.get('x-agent-signature');
 
     const okLegacy = legacySecret && legacySecret === process.env.NEXROOM_CALLBACK_SECRET;
     const okBearer = bearer && bearer === process.env.DASH_PUSH_TOKEN;
@@ -55,25 +66,30 @@ export async function POST(req: NextRequest) {
     }
 
     // ----- หา session_id -----
-    let sessionId: string | null =
-      String(body?.session_id || '').trim() || null;
-
+    let sessionId: string | null = String(body?.session_id || '').trim() || null;
     if (!sessionId) {
       const staffId = String(body?.staff_id || body?.context?.staff_id || '').trim();
-      if (staffId) {
-        sessionId = await findLatestSessionId(staffId);
-      }
+      if (staffId) sessionId = await findLatestSessionId(staffId);
     }
-
     if (!sessionId) {
-      // ไม่ทิ้งงาน แต่แจ้งเตือนชัดเจน (dev จะเห็น log)
       console.warn('[ai/push] missing session_id and cannot infer from staff_id');
       return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
     }
 
-    // ----- Push event ไปยัง SSE channel ของ session นี้ -----
-    // body สามารถเป็น { message, actions?, kind?, money?, ... }
-    ssePublish(sessionId, body);
+    // ===== NEW: เตรียมพารามิเตอร์สำหรับ ssePublish ใหม่ =====
+    const dormId =
+      String(body?.dorm_id || body?.context?.dorm_id || '').trim();
+    const topic =
+      String(body?.event || body?.topic || 'generic').trim();
+    const data =
+      body?.data !== undefined ? body.data : body;
+
+    if (!dormId) {
+      return NextResponse.json({ ok: false, error: 'missing_dorm_id' }, { status: 400 });
+    }
+
+    // ----- Push event ไปยัง SSE channel ของ session นี้ (และบันทึก snapshot) -----
+    await ssePublish(dormId, sessionId, topic, data);
 
     return new NextResponse(JSON.stringify({ ok: true }), {
       status: 200,
@@ -83,9 +99,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: String(e?.message || e) },
-      { status: 500 },
-    );
+    console.error('[ai/push] error:', e);
+    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
   }
 }

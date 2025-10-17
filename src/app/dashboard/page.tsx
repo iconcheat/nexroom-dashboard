@@ -49,8 +49,20 @@ export default function DashboardPage() {
   useEffect(() => {
     let es: EventSource | null = null;
     let retry = 0;
+
+    // new: helper เอา session id จาก cookie; ถ้าไม่มีก็ random แล้วเซ็ต cookie non-HttpOnly
+    const getOrCreateSession = () => {
+      const m = document.cookie.match(/(?:^|;\s*)nxr_session=([^;]+)/);
+      if (m?.[1]) return decodeURIComponent(m[1]);
+      const sid = 'sess-' + Math.random().toString(36).slice(2);
+      // หมดอายุ 7 วัน (dev); โปรดเปลี่ยนเป็นออกจาก server ในโปรดักชัน
+      document.cookie = `nxr_session=${encodeURIComponent(sid)}; path=/; max-age=${7*24*3600}`;
+      return sid;
+    };
+    const sessionId = getOrCreateSession();
+
     const connect = () => {
-      es = new EventSource(`/api/ai/stream?dorm_id=${encodeURIComponent(dormId)}`);
+      es = new EventSource(`/api/ai/events?session_id=${encodeURIComponent(sessionId)}`);
       es.onmessage = (ev) => {
         try {
           const msg = JSON.parse(ev.data || '{}');
