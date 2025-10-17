@@ -1,13 +1,13 @@
 // src/lib/bus.ts
 import type { NextRequest } from 'next/server';
-import { getPool } from '@/lib/db'; // new
 
-// ===== In-memory channels per session_id =====
 type Client = {
   id: string;                    // session_id
   write: (chunk: string) => void;
   close: () => void;
 };
+
+// เก็บผู้ฟังราย session_id
 const channels = new Map<string, Set<Client>>(); // key = session_id
 
 export function sseSubscribe(sessionId: string, client: Client) {
@@ -20,51 +20,57 @@ export function sseSubscribe(sessionId: string, client: Client) {
   };
 }
 
-// --- แก้ไข: เปลี่ยนลายเซ็นให้รองรับ (dorm_id, session_id, topic, data)
-export async function ssePublish(
-  dorm_id: string | null,            // new
-  session_id: string,                // new
-  topic: string,                     // new
-  data: any                          // new
-): Promise<void> {
-  // 1) บันทึกลง DB เพื่อให้ route /api/ai/events รีเพลย์ได้ (optional)
-  try {
-    const pool = getPool();
-    await pool.query(
-      `insert into app.sse_events (dorm_id, session_id, topic, payload)
-       values ($1, $2, $3, $4)`,
-      [dorm_id || null, session_id, topic, data],
-    );
-  } catch (e) {
-    console.warn('[SSE] insert sse_events fail:', e);
-  }
-
-  // 2) กระจายสดให้ client ที่ต่ออยู่ใน session นั้น
-  const set = channels.get(session_id);
+/** กระจาย payload ไปยังทุก client ใน session นั้น ๆ */
+export function ssePublish(sessionId: string, payload: any) {
+  const set = channels.get(sessionId);
   if (!set) return;
-  const payload = { event: topic, data };
-  const frame = `data: ${JSON.stringify(payload)}\n\n`;
+  try { console.log('[SSE:PUSH]', sessionId, Object.keys(payload || {})); } catch {}
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
   for (const c of set) {
-    try { c.write(frame); } catch {}
+    try { c.write(data); } catch {}
   }
 }
 
-// ===== Utilities =====
-export function extractSessionId(req: NextRequest | Request): string | null {
-  const fromApi =
-    // @ts-ignore – บาง runtime เป็น NextRequest ที่มี cookies.get
-    (req as any).cookies?.get?.('nxr_session')?.value as string | undefined;
-  if (fromApi && typeof fromApi === 'string') return fromApi;
+// ===== helpers =====
+function getCookieVal(rawCookie: string, key: string): string | null {
+  if (!rawCookie) return null;
+  const m = rawCookie.match(new RegExp(`(?:^|;\\s*)${key}=([^;]+)`));
+  return m ? decodeURIComponent(m[1]) : null;
+}
 
+/** อ่าน session_id จาก query/header/cookie; รองรับได้หลายชื่อ */
+export function extractSessionId(req: NextRequest | Request): string | null {
+  // // new: query และ header ที่รองรับ
+  try {
+    const u = new URL((req as any).url || '', 'http://x');
+    const q = (u.searchParams.get('session_id') || u.searchParams.get('sid') || '').trim();
+    if (q) return q;
+  } catch {}
+
+  const fromHeader =
+    (req.headers.get('x-nexroom-session') ||
+     req.headers.get('x-session-id') ||
+     '').trim();
+  if (fromHeader) return fromHeader;
+
+  // 1) NextRequest.cookies().get() (บาง runtime)
+  // แก้ไข: รองรับทั้ง nxr_session และ session_id
+  const anyCookies = (req as any).cookies?.get?.bind?.((req as any).cookies);
+  if (anyCookies) {
+    const nxr = (req as any).cookies.get('nxr_session')?.value;
+    if (nxr) return nxr;
+    const sid = (req as any).cookies.get('session_id')?.value;   // new
+    if (sid) return sid;
+  }
+
+  // 2) raw Cookie header
   const cookie = req.headers.get('cookie') || '';
   if (!cookie) return null;
 
-  const part = cookie
-    .split(';')
-    .map(s => s.trim())
-    .find(s => s.startsWith('nxr_session='));
-
-  if (!part) return null;
-  const [, val = ''] = part.split('=');
-  return decodeURIComponent(val) || null;
+  // แก้ไข: ลองหลายชื่อ
+  return (
+    getCookieVal(cookie, 'nxr_session') ||
+    getCookieVal(cookie, 'session_id') ||     // new
+    null
+  );
 }
