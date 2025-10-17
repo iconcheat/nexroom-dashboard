@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import Script from 'next/script';
+import BookingPanel from '../../components/BookingPanel';
 import AgentChat from '../../components/AgentChat';
 
 export default function DashboardPage() {
@@ -249,6 +250,11 @@ export default function DashboardPage() {
                 <div className="txt">88%</div>
               </div>
             </section>
+
+            <section className="card col-6">
+               <div className="label">📅 การจองล่าสุด</div>
+               <BookingPanel data={summary} />
+             </section>
 
             <section className="card col-12" style={{ marginTop: 24 }}>
               <div className="label">🤖 NEXRoom AI</div>
