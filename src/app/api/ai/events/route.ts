@@ -1,4 +1,3 @@
-// src/app/api/ai/events/route.ts
 import { NextRequest } from 'next/server';
 import { sseSubscribe, extractSessionId } from '@/lib/bus';
 import { getPool } from '@/lib/db';
@@ -8,21 +7,20 @@ export const runtime = 'nodejs';
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const fromQuery = url.searchParams.get('session_id');
-  const dormId = url.searchParams.get('dorm_id') || '';
-  const sid = fromQuery || extractSessionId(req);
+  const dormId   = url.searchParams.get('dorm_id') || '';
+  const sid      = fromQuery || extractSessionId(req);
 
-  if (!sid) {
-    return new Response('missing session', { status: 401 });
-  }
+  if (!sid) return new Response('missing session', { status: 401 });
 
   const stream = new ReadableStream({
     async start(controller) {
-      const encoder = new TextEncoder();
-      const write = (chunk: string) => controller.enqueue(encoder.encode(chunk));
+      const enc = new TextEncoder();
+      const write = (s: string) => controller.enqueue(enc.encode(s));
 
+      // เปิดสตรีม
       write(`event: open\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
-      // Replay ล่าสุด
+      // --- replay จาก DB: ใช้รูปแบบ named event ---
       try {
         const pool = getPool();
         const rs = await pool.query(
@@ -34,36 +32,29 @@ export async function GET(req: NextRequest) {
           [sid]
         );
         for (const r of rs.rows) {
-          write(
-            `event: ${r.topic}\n` +
-            `data: ${JSON.stringify(r.payload)}\n\n`);
+          write(`event: ${r.topic}\n` + `data: ${JSON.stringify(r.payload)}\n\n`);
         }
       } catch (e) {
         console.error('[SSE] replay error', e);
       }
 
-      // Subscribe ทั้ง session และ dorm
-      const unsubscribeMain = sseSubscribe(sid, {
-        id: sid,
-        write,
-        close: () => controller.close(),
-      });
+      // subscribe ตาม session เสมอ
+      const unsubSession = sseSubscribe(sid, { id: sid, write, close: () => controller.close() });
 
-      let unsubscribeDorm: (() => void) | null = null;
+      // subscribe ตาม dorm ถ้าระบุมา
+      let unsubDorm: (() => void) | null = null;
       if (dormId && dormId !== sid) {
-        unsubscribeDorm = sseSubscribe(dormId, {
-          id: dormId,
-          write,
-          close: () => controller.close(),
-        });
+        unsubDorm = sseSubscribe(dormId, { id: dormId, write, close: () => controller.close() });
       }
 
+      // keep-alive
       const ping = setInterval(() => write(`event: ping\ndata: {}\n\n`), 25_000);
 
+      // ปิดเมื่อ client หลุด
       (req as any).signal?.addEventListener?.('abort', () => {
         clearInterval(ping);
-        try { unsubscribeMain(); } catch {}
-        try { unsubscribeDorm?.(); } catch {}
+        try { unsubSession(); } catch {}
+        try { unsubDorm?.(); } catch {}
         controller.close();
       });
     },
