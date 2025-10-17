@@ -1,29 +1,21 @@
 // src/app/api/ai/push/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
-import { ssePublish } from '@/lib/bus';
+import { ssePublish } from '@/lib/bus';     // แก้ไข: ใช้ลายเซ็นใหม่ (4 args)
 import { getPool } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
-/* ==========================================================
-   1️⃣ ตรวจสอบลายเซ็น HMAC (สำหรับ webhook จาก Agent)
-   ========================================================== */
+// verify HMAC(body, AGENT_WEBHOOK_SECRET) if header x-agent-signature is provided
 function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
   if (!headerSig) return false;
   const secret = process.env.AGENT_WEBHOOK_SECRET || '';
   if (!secret) return false;
   const calc = crypto.createHmac('sha256', secret).update(bodyRaw).digest('hex');
-  try {
-    return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(headerSig));
-  } catch {
-    return false;
-  }
+  return crypto.timingSafeEqual(Buffer.from(calc), Buffer.from(headerSig));
 }
 
-/* ==========================================================
-   2️⃣ fallback หา session ล่าสุดจาก staff_id (ถ้าไม่มีส่งมา)
-   ========================================================== */
+// fallback หา session ล่าสุดจาก staff_id (ถ้าจำเป็น)
 async function findLatestSessionId(staffId: string): Promise<string | null> {
   try {
     const pool = getPool();
@@ -38,35 +30,35 @@ async function findLatestSessionId(staffId: string): Promise<string | null> {
       [staffId],
     );
     return rows[0]?.session_id ?? null;
-  } catch (err) {
-    console.error('[findLatestSessionId] error:', err);
+  } catch {
     return null;
   }
 }
 
-/* ==========================================================
-   3️⃣ main: push event → ส่งเข้าระบบ SSE (Postgres version)
-   ========================================================== */
 export async function POST(req: NextRequest) {
   try {
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
 
-    // ----- Auth -----
+    // ----- Auth (legacy / bearer / hmac) -----
     const legacySecret = req.headers.get('x-nexroom-callback-secret') || '';
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     const hmacSig = req.headers.get('x-agent-signature');
 
     const okLegacy = legacySecret && legacySecret === process.env.NEXROOM_CALLBACK_SECRET;
     const okBearer = bearer && bearer === process.env.DASH_PUSH_TOKEN;
-    const okHmac = verifyHmac(raw, hmacSig);
+    const okHmac   = verifyHmac(raw, hmacSig);
 
     if (!(okLegacy || okBearer || okHmac)) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
     // ----- หา session_id -----
-    let sessionId: string | null = String(body?.session_id || '').trim() || null;
+    let sessionId: string | null =
+      String(body?.session_id || '').trim()
+      || (req.headers.get('x-session-id') || '').trim()   // new: เผื่อส่งมาใน header
+      || null;
+
     if (!sessionId) {
       const staffId = String(body?.staff_id || body?.context?.staff_id || '').trim();
       if (staffId) sessionId = await findLatestSessionId(staffId);
@@ -76,20 +68,42 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
     }
 
-    // ===== NEW: เตรียมพารามิเตอร์สำหรับ ssePublish ใหม่ =====
+    // ----- หา dorm_id (ยืดหยุ่น) -----
     const dormId =
-      String(body?.dorm_id || body?.context?.dorm_id || '').trim();
-    const topic =
-      String(body?.event || body?.topic || 'generic').trim();
-    const data =
-      body?.data !== undefined ? body.data : body;
+      body?.dorm_id
+      || body?.context?.dorm_id
+      || req.headers.get('x-nexroom-dorm')
+      || null;
 
-    if (!dormId) {
-      return NextResponse.json({ ok: false, error: 'missing_dorm_id' }, { status: 400 });
+    // ----- กำหนด topic (event) และ data -----
+    let topic = String(body?.event || '').trim();
+    if (!topic && typeof body?.kind === 'string') {
+      const map: Record<string,string> = {
+        'booking.completed': 'reserve_summary',
+        'payment.done':      'payment_done',
+      };
+      topic = map[body.kind] || body.kind;
     }
+    if (!topic) topic = 'message';
 
-    // ----- Push event ไปยัง SSE channel ของ session นี้ (และบันทึก snapshot) -----
-    await ssePublish(dormId, sessionId, topic, data);
+    // เลือก data ที่จะส่งไป panel
+    const data =
+      body?.data ??
+      body?.result ??
+      {
+        // fallback ใส่บางฟิลด์ที่คุ้นเคย
+        message: body?.message ?? '',
+        actions: Array.isArray(body?.actions) ? body.actions : [],
+        booking_id: body?.booking_id ?? null,
+        dorm_id: dormId ?? null,
+        room_no: body?.room_no ?? null,
+        submission_id: body?.submission_id ?? null,
+        start_date: body?.start_date ?? null,
+        money: body?.money ?? {},
+      };
+
+    // ----- กระจาย + บันทึก -----
+    await ssePublish(dormId, sessionId, topic, data); // แก้ไข: ส่ง 4 อาร์กิวเมนต์
 
     return new NextResponse(JSON.stringify({ ok: true }), {
       status: 200,
@@ -99,7 +113,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (e: any) {
-    console.error('[ai/push] error:', e);
-    return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: String(e?.message || e) },
+      { status: 500 },
+    );
   }
 }

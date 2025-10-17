@@ -6,12 +6,9 @@ import { getPool } from '@/lib/db';                 // new
 export const runtime = 'nodejs';
 
 export async function GET(req: NextRequest) {
-  // รับจาก query ให้สิทธิ์สูงสุด (dev/test หรือเปิดจากลิงก์)
   const url = new URL(req.url);
   const fromQuery = url.searchParams.get('session_id');
-
-  // ไม่มีก็ลองจาก cookie/header
-  const sid = fromQuery || extractSessionId(req);
+  const sid = fromQuery || extractSessionId(req);  // แก้ไข
 
   if (!sid) {
     return new Response('missing session', { status: 401 });
@@ -22,10 +19,10 @@ export async function GET(req: NextRequest) {
       const encoder = new TextEncoder();
       const write = (chunk: string) => controller.enqueue(encoder.encode(chunk));
 
-      // เปิดสตรีมพร้อม event ชื่อ open
+      // เปิดสตรีม
       write(`event: open\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
-      // ===== รีเพลย์ “เหตุการณ์ล่าสุด” จาก DB =====
+      // ===== รีเพลย์เหตุการณ์ล่าสุดจาก DB =====
       try {
         const pool = getPool();
         const rs = await pool.query(
@@ -43,14 +40,14 @@ export async function GET(req: NextRequest) {
         console.error('[SSE] replay error', e);
       }
 
-      // สมัครเข้า channel (รับอีเวนต์สด)
+      // สมัครรับสด
       const unsubscribe = sseSubscribe(sid, {
         id: sid,
         write,
         close: () => controller.close(),
       });
 
-      // keep-alive ทุก 25s
+      // keep-alive
       const ping = setInterval(() => write(`event: ping\ndata: {}\n\n`), 25_000);
 
       // ปิดเมื่อ client หลุด
