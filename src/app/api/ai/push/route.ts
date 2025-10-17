@@ -8,7 +8,6 @@ export const runtime = 'nodejs';
 
 /** verify HMAC(body, AGENT_WEBHOOK_SECRET) if header x-agent-signature is provided */
 function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
-  // เดิม
   if (!headerSig) return false;
   const secret = process.env.AGENT_WEBHOOK_SECRET || '';
   if (!secret) return false;
@@ -18,7 +17,6 @@ function verifyHmac(bodyRaw: string, headerSig: string | null): boolean {
 
 /** fallback หา session ล่าสุดจาก staff_id (ถ้าจำเป็น) */
 async function findLatestSessionId(staffId: string): Promise<string | null> {
-  // เดิม
   try {
     const pool = getPool();
     const { rows } = await pool.query(
@@ -43,7 +41,7 @@ export async function POST(req: NextRequest) {
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
 
-    // ----- Auth: รองรับ 3 ช่องทาง (เหมือนเดิม) -----
+    // ----- Auth (เหมือนเดิม) -----
     const legacySecret = req.headers.get('x-nexroom-callback-secret') || '';
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     const hmacSig = req.headers.get('x-agent-signature');
@@ -51,12 +49,11 @@ export async function POST(req: NextRequest) {
     const okLegacy = legacySecret && legacySecret === process.env.NEXROOM_CALLBACK_SECRET;
     const okBearer = bearer && bearer === process.env.DASH_PUSH_TOKEN;
     const okHmac = verifyHmac(raw, hmacSig);
-
     if (!(okLegacy || okBearer || okHmac)) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
 
-    // ----- หา session_id (เหมือนเดิม) -----
+    // ----- หา session_id -----
     let sessionId: string | null = String(body?.session_id || '').trim() || null;
     if (!sessionId) {
       const staffId = String(body?.staff_id || body?.context?.staff_id || '').trim();
@@ -67,45 +64,55 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'missing_session_id' }, { status: 400 });
     }
 
-    // ----- ระบุ topic + payload ที่จะส่งไปหน้าแดชบอร์ด -----
-    // // แก้ไข: ให้ยึด body.event ถ้ามี, ถ้าไม่มีและใส่ kind มาก็ map หลวมๆ ได้
+    // ----- สร้างค่าที่จะ push -----
+    // แก้ไข: map ชื่อ event/kind → topic ให้ชัด
     const topic: string =
       String(body?.event || '').trim()
-        || (String(body?.kind || '').startsWith('booking') ? 'reserve_summary' : '')
-        || 'message';
+      || (String(body?.kind || '').startsWith('booking') ? 'reserve_summary' : '')
+      || 'message';
 
-    // // แก้ไข: รูปแบบ data ที่แดชบอร์ดคาดหวัง: { event, data }
+    // แก้ไข: รูปแบบ data ที่ฝั่ง client ใช้จริง = { event, data }
     const data = body?.data ?? body;
 
-    // ----- บันทึกลง DB (ถ้ามี dorm_id) แล้วค่อยกระจายสด -----
-    // // new: รองรับ dorm_id 3 ทาง: body.dorm_id > header x-nexroom-dorm > body.data.dorm_id
+    // new: ดึง dorm_id ได้ 3 ทาง
     const dormId =
       String(body?.dorm_id || '').trim()
       || String(req.headers.get('x-nexroom-dorm') || '').trim()
       || String((body?.data ?? body)?.dorm_id || '').trim()
       || '';
 
-    try {
-      if (dormId) {
-        // // new: insert แบบระบุ dorm_id เสมอเพื่อผ่าน NOT NULL
-        const pool = getPool();
-        await pool.query(
-          `INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
-           VALUES ($1, $2, $3, $4::jsonb)`,
-          [dormId, sessionId, topic, JSON.stringify(data)],
-        );
-      } else {
-        // ถ้าไม่ได้ส่ง dorm_id มา จะ "ข้ามการ insert" เพื่อไม่ให้ 500
-        console.warn('[ai/push] skip DB insert: missing dorm_id (but will still live-push)');
-      }
-    } catch (e) {
-      // ถ้า insert พัง เราไม่ให้ 500 — log ไว้ แล้วไปต่อ live push
-      console.error('[SSE:DB] insert error', e);
-    }
+    // ----- อแดปเตอร์: รองรับทั้ง ssePublish(4 args) และ (2 args) -----
+    const sp = ssePublish as unknown as (...args: any[]) => any;
 
-    // ----- Live push ไปยัง session นี้ (in-memory) -----
-    // รูปแบบที่แดชบอร์ดฝั่ง client ใช้อยู่: { event, data }
-    ssePublish(sessionId, { event: topic, data });
+    if (typeof sp === 'function' && sp.length >= 4) {
+      // ✅ เคสโปรเจกต์ที่คาดหวัง 4 อาร์กิวเมนต์ (DB+NOTIFY อยู่ในฟังก์ชันแล้ว)
+      // // new: ให้ dormId เป็นค่าว่างไม่ได้ → ถ้าไม่มีให้ข้ามด้วยการโยน live-only (ด้านล่าง) แทน
+      if (dormId) {
+        await sp(dormId, sessionId, topic, data); // //new
+      } else {
+        console.warn('[ai/push] ssePublish(4) requires dorm_id. Fallback to live-only push.');
+        // live-only
+        sp(sessionId, { event: topic, data }); // @ts-ignore  //new: บาง impl รองรับ 2 args ด้วย
+      }
+    } else {
+      // ✅ เคสเวอร์ชันเก่า (2 อาร์กิวเมนต์) — ใส่กันล้ม NOT NULL ให้ DB เอง
+      try {
+        if (dormId) {
+          const pool = getPool();
+          await pool.query(
+            `INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
+             VALUES ($1, $2, $3, $4::jsonb)`,
+            [dormId, sessionId, topic, JSON.stringify(data)],
+          );
+        } else {
+          console.warn('[ai/push] skip DB insert: missing dorm_id (live push only)');
+        }
+      } catch (e) {
+        console.error('[SSE:DB] insert error', e);
+        // ไม่ให้ 500 — ยัง live push ต่อ
+      }
+      sp(sessionId, { event: topic, data }); // //แก้ไข: รูปแบบ payload ที่ client รออยู่
+    }
 
     return new NextResponse(JSON.stringify({ ok: true }), {
       status: 200,
