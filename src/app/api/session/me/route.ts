@@ -24,7 +24,7 @@ export async function GET() {
     const qSession = `
       SELECT s.session_id, s.staff_id, s.dorm_id, s.is_valid, s.expires_at,
              u.username, u.full_name, u.role, u.telegram_id,
-             d.name AS dorm_name
+             d.dorm_name AS dorm_name
       FROM app.staff_sessions s
       JOIN app.staff_users  u ON s.staff_id = u.staff_id
       LEFT JOIN app.dorms   d ON s.dorm_id  = d.dorm_id
