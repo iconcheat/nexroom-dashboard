@@ -18,10 +18,12 @@ async function findDormIdBySession(sessionId: string): Promise<string | null> {
   try {
     const pool = getPool();
     const { rows } = await pool.query(
-      `SELECT dorm_id FROM app.staff_sessions
+      `SELECT dorm_id
+         FROM app.staff_sessions
         WHERE session_id = $1 AND is_valid = true AND expires_at > now()
+        ORDER BY created_at DESC
         LIMIT 1`,
-      [sessionId],
+      [sessionId]
     );
     return rows[0]?.dorm_id ?? null;
   } catch {
@@ -34,6 +36,7 @@ export async function POST(req: NextRequest) {
     const raw = await req.text();
     const body = raw ? JSON.parse(raw) : {};
 
+    // auth (3 ทาง)
     const legacySecret = req.headers.get('x-nexroom-callback-secret') || '';
     const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     const hmacSig = req.headers.get('x-agent-signature');
@@ -63,7 +66,7 @@ export async function POST(req: NextRequest) {
 
     const data = (body?.data && typeof body.data === 'object') ? body.data : body;
 
-    // ----- DB insert/upsert -----
+    // DB upsert (กันซ้ำตาม key)
     try {
       if (!dormId) {
         console.warn('[ai/push] live-only push: missing dorm_id');
@@ -76,20 +79,22 @@ export async function POST(req: NextRequest) {
            DO UPDATE SET payload = EXCLUDED.payload, created_at = now()`,
           [dormId, sessionId, topic, data]
         );
+        // ใช้ pg_notify แทน NOTIFY ... $1
+        await pool.query('SELECT pg_notify($1, $2)', [
+          'sse_notify',
+          JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic }),
+        ]);
       }
     } catch (e: any) {
       console.error('[SSE:DB] insert/upsert error:', e?.message || e);
     }
 
-    // ----- Live push -----
+    // live push (คง behaviour เดิม)
     await ssePublish(dormId, sessionId, topic, data);
 
     return new NextResponse(JSON.stringify({ ok: true }), {
       status: 200,
-      headers: {
-        'content-type': 'application/json',
-        'cache-control': 'no-store',
-      },
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
     });
   } catch (e: any) {
     return NextResponse.json({ ok: false, error: String(e?.message || e) }, { status: 500 });

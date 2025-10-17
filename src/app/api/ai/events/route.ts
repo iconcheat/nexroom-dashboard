@@ -1,3 +1,4 @@
+// src/app/api/ai/events/route.ts
 import { NextRequest } from 'next/server';
 import { sseSubscribe, extractSessionId } from '@/lib/bus';
 import { getPool } from '@/lib/db';
@@ -20,7 +21,7 @@ export async function GET(req: NextRequest) {
       // เปิดสตรีม
       write(`event: open\ndata: ${JSON.stringify({ ok: true })}\n\n`);
 
-      // --- replay จาก DB: ใช้รูปแบบ named event ---
+      // --- replay (ล่าสุดก่อน) ---
       try {
         const pool = getPool();
         const rs = await pool.query(
@@ -38,10 +39,10 @@ export async function GET(req: NextRequest) {
         console.error('[SSE] replay error', e);
       }
 
-      // subscribe ตาม session เสมอ
+      // subscribe: session เสมอ
       const unsubSession = sseSubscribe(sid, { id: sid, write, close: () => controller.close() });
 
-      // subscribe ตาม dorm ถ้าระบุมา
+      // subscribe: dorm ถ้ามี
       let unsubDorm: (() => void) | null = null;
       if (dormId && dormId !== sid) {
         unsubDorm = sseSubscribe(dormId, { id: dormId, write, close: () => controller.close() });
@@ -50,7 +51,6 @@ export async function GET(req: NextRequest) {
       // keep-alive
       const ping = setInterval(() => write(`event: ping\ndata: {}\n\n`), 25_000);
 
-      // ปิดเมื่อ client หลุด
       (req as any).signal?.addEventListener?.('abort', () => {
         clearInterval(ping);
         try { unsubSession(); } catch {}

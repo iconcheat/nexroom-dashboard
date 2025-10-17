@@ -1,3 +1,4 @@
+// src/lib/bus.ts
 import type { NextRequest } from 'next/server';
 import { getPool } from '@/lib/db';
 
@@ -17,6 +18,9 @@ export function sseSubscribe(channelId: string, client: Client) {
 
 /**
  * Broadcast แบบ multi-tenant + บันทึกลง DB (upsert)
+ * - ส่ง event ทั้งตาม session_id และตาม dormId (ถ้ามี listener)
+ * - upsert ลง app.sse_events
+ * - ใช้ pg_notify แบบ parameterized
  */
 export async function ssePublish(
   dormId: string,
@@ -24,7 +28,7 @@ export async function ssePublish(
   topic: string,
   data: any
 ): Promise<void> {
-  // ส่งเป็น "named SSE event" ให้ UI จับด้วย addEventListener(topic, ...)
+  // ส่งเป็น "named SSE event" (UI จับด้วย addEventListener(topic, ...))
   const packet = `event: ${topic}\n` + `data: ${JSON.stringify(data)}\n\n`;
 
   // 1) ส่งให้ผู้ฟังช่อง session
@@ -45,8 +49,9 @@ export async function ssePublish(
        DO UPDATE SET payload = EXCLUDED.payload, created_at = now()`,
       [dormId, sessionId, topic, JSON.stringify(data)]
     );
-    // ถ้ามี LISTEN/NOTIFY
-    await pool.query(`NOTIFY sse_notify, $1`, [
+    // ใช้ pg_notify (parameterized)
+    await pool.query('SELECT pg_notify($1, $2)', [
+      'sse_notify',
       JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic }),
     ]);
   } catch (e) {
@@ -60,6 +65,7 @@ function getCookieVal(raw: string, key: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/** อ่าน session_id จาก query/header/cookie; รองรับได้หลายชื่อ */
 export function extractSessionId(req: NextRequest | Request): string | null {
   // query
   try {
