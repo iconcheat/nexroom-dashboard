@@ -34,7 +34,9 @@ export async function GET(req: NextRequest) {
           [sid]
         );
         for (const r of rs.rows) {
-          write(`data: ${JSON.stringify({ event: r.topic, data: r.payload })}\n\n`);
+          write(
+            `event: ${r.topic}\n` +
+            `data: ${JSON.stringify(r.payload)}\n\n`);
         }
       } catch (e) {
         console.error('[SSE] replay error', e);

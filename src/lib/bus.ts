@@ -1,35 +1,34 @@
 // src/lib/bus.ts
 import type { NextRequest } from 'next/server';
-import { getPool } from '@/lib/db';   // สำหรับบันทึก event ลง DB
+import { getPool } from '@/lib/db';   // สำหรับบันทึก event ลง DB (replay/notify)
 
-// =======================================================
-// ===== In-memory channel (ต่อ instance) =====
+// ======================= In-memory channels (per instance) =======================
 type Client = {
-  id: string;                    // session_id
+  id: string;                    // โดยมากคือ session_id
   write: (chunk: string) => void;
   close: () => void;
 };
 
-const channels = new Map<string, Set<Client>>();
+const channels = new Map<string, Set<Client>>(); // key = channelId (session_id หรือ dorm_id ก็ได้)
 
-// =======================================================
-// ===== Subscribe / Publish =====
-export function sseSubscribe(sessionId: string, client: Client) {
-  let set = channels.get(sessionId);
-  if (!set) { set = new Set(); channels.set(sessionId, set); }
+// ================================ Subscribe / Unsubscribe ================================
+export function sseSubscribe(channelId: string, client: Client) {
+  let set = channels.get(channelId);
+  if (!set) { set = new Set(); channels.set(channelId, set); }
   set.add(client);
   return () => {
     set!.delete(client);
-    if (!set!.size) channels.delete(sessionId);
+    if (!set!.size) channels.delete(channelId);
   };
 }
 
+// ====================================== Publish ======================================
 /**
- * Multi-tenant version — รองรับ dorm หลายแห่ง
- * @param dormId     หอพัก
- * @param sessionId  session ปัจจุบัน
- * @param topic      ชื่อ event เช่น "reserve_summary"
- * @param data       payload ที่ต้องการส่ง
+ * Multi-tenant: broadcast ไปทั้ง session และ dorm
+ *  - dormId     : ห้องพัก/ตึก (ใช้สำหรับ replay และช่องสัญญาณระดับหอ)
+ *  - sessionId  : session ปัจจุบัน (ช่องสัญญาณของผู้ใช้)
+ *  - topic      : ชื่อ event (เช่น 'reserve_summary')
+ *  - data       : payload (object ที่แสดงในแดชบอร์ด)
  */
 export async function ssePublish(
   dormId: string,
@@ -37,11 +36,12 @@ export async function ssePublish(
   topic: string,
   data: any
 ): Promise<void> {
-  // --- 1) push event ไปยัง client ที่เปิดอยู่ใน instance นี้ ---
-  const payload = { event: topic, data };
-  const packet = `data: ${JSON.stringify(payload)}\n\n`;
+  // เตรียมแพ็กเก็ตแบบ "named SSE event"
+  const packet =
+    `event: ${topic}\n` +
+    `data: ${JSON.stringify(data)}\n\n`;
 
-  // ส่งถึง session
+  // 1) ส่งให้ผู้ฟังช่อง session
   const setSession = channels.get(sessionId);
   if (setSession) {
     for (const c of setSession) {
@@ -49,7 +49,7 @@ export async function ssePublish(
     }
   }
 
-  // ส่งถึง dorm (ถ้ามี listener)
+  // 1.1) ส่งให้ผู้ฟังช่อง dorm (ถ้ามี)
   const setDorm = channels.get(dormId);
   if (setDorm) {
     for (const c of setDorm) {
@@ -57,50 +57,43 @@ export async function ssePublish(
     }
   }
 
-  // --- 2) บันทึก event ลงฐานข้อมูล เพื่อใช้ replay/notify ---
+  // 2) บันทึกลง DB เพื่อใช้ replay / cross-instance notify
   try {
     const pool = getPool();
     await pool.query(
       `INSERT INTO app.sse_events (dorm_id, session_id, topic, payload)
-       VALUES ($1::uuid, $2::text, $3::text, $4::jsonb)
-       ON CONFLICT (dorm_id, session_id, topic)
-       DO UPDATE SET payload = EXCLUDED.payload, created_at = now()`,
-      [dormId, sessionId, topic, data]
+       VALUES ($1::uuid, $2::text, $3::text, $4::jsonb)`,
+      [dormId, sessionId, topic, JSON.stringify(data)]
     );
-    // แจ้ง instance อื่น ๆ ถ้ามี listener
-    const notifyPayload = JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic })
-      .replace(/'/g, "''");  // escape single quote
-    await pool.query(`NOTIFY sse_notify, '${notifyPayload}'`);
+    // ถ้าใช้ LISTEN/NOTIFY
+    await pool.query(`NOTIFY sse_notify, $1`, [
+      JSON.stringify({ dorm_id: dormId, session_id: sessionId, topic }),
+    ]);
   } catch (e) {
     console.error('[SSE:DB]', e);
   }
 }
 
-// =======================================================
-// ===== Extract Session ID =====
+// ================================== Helpers: extract session id ==================================
 function getCookieVal(raw: string, key: string): string | null {
   const m = raw.match(new RegExp(`(?:^|;\\s*)${key}=([^;]+)`));
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/** อ่าน session_id จาก query/header/cookie (รองรับหลายชื่อ) */
 export function extractSessionId(req: NextRequest | Request): string | null {
+  // 1) query
   try {
     const u = new URL((req as any).url || '', 'http://x');
-    const q =
-      (u.searchParams.get('session_id') ||
-       u.searchParams.get('sid') ||
-       ''
-      ).trim();
+    const q = (u.searchParams.get('session_id') || u.searchParams.get('sid') || '').trim();
     if (q) return q;
   } catch {}
 
-  const fromHeader =
-    (req.headers.get('x-nexroom-session') ||
-     req.headers.get('x-session-id') ||
-     ''
-    ).trim();
+  // 2) headers
+  const fromHeader = (req.headers.get('x-nexroom-session') || req.headers.get('x-session-id') || '').trim();
   if (fromHeader) return fromHeader;
 
+  // 3) NextRequest cookies API (ถ้ามี)
   const cApi = (req as any).cookies;
   if (cApi?.get) {
     const nxr = cApi.get('nxr_session')?.value;
@@ -109,6 +102,7 @@ export function extractSessionId(req: NextRequest | Request): string | null {
     if (sid) return sid;
   }
 
+  // 4) raw Cookie header
   const raw = req.headers.get('cookie') || '';
   if (!raw) return null;
 
