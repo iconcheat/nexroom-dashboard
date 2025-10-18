@@ -69,27 +69,36 @@ export function useAgent() {
   }, []);
 
   // 2) subscribe SSE
+  // src/hooks/useAgent.ts (เฉพาะ useEffect ที่ subscribe SSE)
   useEffect(() => {
     if (esRef.current) return;
     const es = new EventSource('/api/ai/events');
-    es.addEventListener('message', (ev) => {
+
+    // handler กลาง: ใช้ได้กับทั้ง default และ named events
+    const pushToChat = (raw: string) => {
       try {
-        const msg = JSON.parse(ev.data || '{}');
-        if (msg?.message) {
-          setLogs((prev) => [
-            ...prev,
-            { from: 'agent', text: String(msg.message), actions: msg.actions || [] },
-          ]);
+        const obj = JSON.parse(raw || '{}');
+        // รองรับทั้งโครง {message, actions} หรือ {data:{message,actions}}
+        const data = obj?.data && typeof obj.data === 'object' ? obj.data : obj;
+        const msg  = data?.message;
+        const actions = Array.isArray(data?.actions) ? data.actions : [];
+        if (msg) {
+          setLogs((prev) => [...prev, { from: 'agent', text: String(msg), actions }]);
         }
-      } catch {
-        /* ignore */
-      }
-    });
-    esRef.current = es;
-    return () => {
-      es.close();
-      esRef.current = null;
+      } catch {/* ignore */}
     };
+
+    // default (ไม่มีชื่อ event)
+    es.onmessage = (ev) => pushToChat(ev.data);
+
+    // named events ที่ backend อาจส่งมา
+    const names = ['message', 'reserve_summary', 'payment_done', 'notify', 'ai.reply'];
+    names.forEach((name) => {
+      es.addEventListener(name, (ev) => pushToChat((ev as MessageEvent).data));
+    });
+
+    esRef.current = es;
+    return () => { es.close(); esRef.current = null; };
   }, []);
 
   // 3) ส่งข้อความ → แนบ context ไปด้วย (ถ้ายังโหลดไม่เสร็จ ก็ส่งไปก่อนแต่ยังแนบ context ไม่ได้)
