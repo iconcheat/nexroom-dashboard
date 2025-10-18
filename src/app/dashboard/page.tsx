@@ -5,6 +5,7 @@ import Head from 'next/head';
 import Script from 'next/script';
 import BookingPanel from '../../components/BookingPanel';
 import AgentChat from '../../components/AgentChat';
+import RoomsOverviewPanel from '@/components/RoomsOverviewPanel';
 
 export default function DashboardPage() {
   // ===== State / Context =====
@@ -13,6 +14,7 @@ export default function DashboardPage() {
   const [dormName, setDormName] = useState<string>('');
   const [userName, setUserName] = useState<string>('');
   const [billingPeriod, setBillingPeriod] = useState<string>('');
+  const [roomsOverview, setRoomsOverview] = useState<any>(null);
   const CASH_WEBHOOK = '/api/payments/cash';
   const fmtTH = (n: number) =>
     (typeof n === 'number' ? n.toLocaleString('th-TH') : String(n ?? ''));
@@ -104,6 +106,13 @@ export default function DashboardPage() {
       } catch {}
     });
 
+    es.addEventListener('rooms_overview', (ev: MessageEvent) => {
+  try {
+    const { data } = JSON.parse(ev.data || '{}');
+    if (data?.rooms) setRoomsOverview(data);
+  } catch {}
+});
+
     es.onerror = () => {
       es?.close();
       const backoff = Math.min(1000 * Math.pow(2, retry++), 15000);
@@ -121,6 +130,7 @@ export default function DashboardPage() {
         if (j?.dorm_name) setDormName(j.dorm_name);
         if (j?.user_name) setUserName(j.user_name);
         if (j?.last_reserve_summary) setSummary(j.last_reserve_summary);
+        if (j?.last?.rooms_overview?.data) setRoomsOverview(j.last.rooms_overview.data);
         dormId = j?.dorm_id || null;
       }
     } catch (err) {
@@ -312,6 +322,15 @@ export default function DashboardPage() {
             <section className="card col-6">
                <div className="label">📅 การจองล่าสุด</div>
                <BookingPanel data={summary} />
+             </section>
+
+             <section className="card col-6">
+               <div className="label">📅 การจองล่าสุด</div>
+               <BookingPanel data={summary} />
+             </section>
+
+             <section className="card col-6">
+               <RoomsOverviewPanel data={roomsOverview} />
              </section>
 
             <section className="card col-12" style={{ marginTop: 24 }}>
