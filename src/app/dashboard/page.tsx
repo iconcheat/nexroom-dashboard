@@ -46,32 +46,29 @@ export default function DashboardPage() {
     }
   };
 
-  // ===== SSE + initial preload =====
-useEffect(() => {
-  // 1) preload ข้อมูลจาก DB ด้วย session_id ในคุกกี้ (Server จะอ่านเอง)
-  (async () => {
-    try {
-      const r = await fetch('/api/dashboard/initial', { cache: 'no-store' });
-      if (r.ok) {
-        const j = await r.json();
-        if (j?.dorm_name) setDormName(j.dorm_name);
-        if (j?.user_name) setUserName(j.user_name);
-        if (j?.last_reserve_summary) setSummary(j.last_reserve_summary);
-      }
-    } catch {}
-  })();
-
-  // 2) ต่อ SSE โดย “ไม่” ใส่ ?session_id=...
+  useEffect(() => {
   let es: EventSource | null = null;
   let retry = 0;
-  const connect = () => {
-    es = new EventSource('/api/ai/events');
+  let dormId: string | null = null;
 
-    // default message (กรณี backend ส่งรูปแบบเก่า)
+  // --- ประกาศ connect ก่อน ---
+  const connect = () => {
+    // ดึง session_id จาก cookie
+    const m = document.cookie.match(/(?:^|;\s*)nxr_session=([^;]+)/);
+    const sessionId = m?.[1] ? decodeURIComponent(m[1]) : '';
+
+    // แนบ dorm_id + session_id ใน query
+    const qs = new URLSearchParams();
+    if (sessionId) qs.set('session_id', sessionId);
+    if (dormId) qs.set('dorm_id', dormId);
+
+    es = new EventSource(`/api/ai/events?${qs.toString()}`);
+
+    // -- default event --
     es.onmessage = (ev) => {
       try {
-        const msg  = JSON.parse(ev.data || '{}');
-        const evt  = msg.event || msg?.data?.event;
+        const msg = JSON.parse(ev.data || '{}');
+        const evt = msg.event || msg?.data?.event;
         const data = msg.data || msg;
         if (!evt) return;
 
@@ -79,23 +76,28 @@ useEffect(() => {
         if (evt === 'payment_done') {
           setSummary((prev: any) => {
             if (!prev) return data;
-            const same = !prev?.booking_id || prev?.booking_id === (data?.booking_id || prev?.booking_id);
+            const same =
+              !prev?.booking_id ||
+              prev?.booking_id === (data?.booking_id || prev?.booking_id);
             return same ? { ...prev, ...data } : prev;
           });
         }
       } catch {}
     };
 
-    // named SSE events (รูปแบบใหม่)
+    // -- named events --
     es.addEventListener('reserve_summary', (ev: MessageEvent) => {
       try { setSummary(JSON.parse(ev.data || '{}')); } catch {}
     });
+
     es.addEventListener('payment_done', (ev: MessageEvent) => {
       try {
         const data = JSON.parse(ev.data || '{}');
         setSummary((prev: any) => {
           if (!prev) return data;
-          const same = !prev?.booking_id || prev?.booking_id === (data?.booking_id || prev?.booking_id);
+          const same =
+            !prev?.booking_id ||
+            prev?.booking_id === (data?.booking_id || prev?.booking_id);
           return same ? { ...prev, ...data } : prev;
         });
       } catch {}
@@ -104,11 +106,29 @@ useEffect(() => {
     es.onerror = () => {
       es?.close();
       const backoff = Math.min(1000 * Math.pow(2, retry++), 15000);
+      console.warn(`SSE reconnecting in ${backoff}ms`);
       setTimeout(connect, backoff);
     };
   };
 
-  connect();
+  // --- preload initial แล้วค่อย connect() ---
+  (async () => {
+    try {
+      const r = await fetch('/api/dashboard/initial', { cache: 'no-store' });
+      if (r.ok) {
+        const j = await r.json();
+        if (j?.dorm_name) setDormName(j.dorm_name);
+        if (j?.user_name) setUserName(j.user_name);
+        if (j?.last_reserve_summary) setSummary(j.last_reserve_summary);
+        dormId = j?.dorm_id || null;
+      }
+    } catch (err) {
+      console.error('initial load error:', err);
+    }
+
+    connect(); // ✅ ตอนนี้ TypeScript จะไม่ฟ้องแล้ว
+  })();
+
   return () => { es?.close(); };
 }, []);
 
