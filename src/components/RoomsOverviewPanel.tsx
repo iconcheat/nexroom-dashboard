@@ -37,12 +37,13 @@ export default function RoomsOverviewPanel({ data }: { data: any }) {
   };
 
   const list = rawList
-    .map((r) => ({
-      room_no: r.room_no ?? r.room ?? '',
-      status: deriveStatus(r),
-      tenant: r.tenant ?? r.tenant_name ?? '-',
-    }))
-    .filter((r) => !!r.room_no); // กันค่าที่ไม่มีเลขห้อง
+  .map((r) => ({
+    room_no: (r.room_no ?? r.room ?? '').toString().trim(), // << ครอบทั้งสองชื่อ
+    status: deriveStatus(r),
+    tenant: r.tenant ?? r.tenant_name ?? '-',
+  }))
+  .filter((r) => r.room_no !== ''); // เงื่อนไขหลวมขึ้น
+  console.log('RoomsOverviewPanel list size:', list.length, list.slice(0,3));
 
   if (!list.length) {
     return (

@@ -106,12 +106,21 @@ export default function DashboardPage() {
       } catch {}
     });
 
+    // --- rooms_overview ---
     es.addEventListener('rooms_overview', (ev: MessageEvent) => {
-  try {
-    const { data } = JSON.parse(ev.data || '{}');
-    if (data?.rooms) setRoomsOverview(data);
-  } catch {}
-});
+      try {
+        const raw = JSON.parse(ev.data || '{}');
+        // รองรับได้ทั้ง {rooms:[]} หรือ {data:{rooms:[]}}
+        const rooms =
+          Array.isArray(raw?.rooms) ? raw.rooms :
+          Array.isArray(raw?.data?.rooms) ? raw.data.rooms :
+          [];
+
+        // << เซ็ตเป็น object ที่มี rooms ชัดเจน
+        setRoomsOverview({ rooms, updated_at: raw?.updated_at || raw?.data?.updated_at });
+        console.log('rooms_overview -> rooms:', rooms.length);
+      } catch (e) { console.warn('parse rooms_overview fail', e); }
+    });
 
     es.onerror = () => {
       es?.close();
@@ -130,7 +139,13 @@ export default function DashboardPage() {
         if (j?.dorm_name) setDormName(j.dorm_name);
         if (j?.user_name) setUserName(j.user_name);
         if (j?.last_reserve_summary) setSummary(j.last_reserve_summary);
-        if (j?.last?.rooms_overview?.data) setRoomsOverview(j.last.rooms_overview.data);
+        if (j?.last?.rooms_overview) {
+          const raw = j.last.rooms_overview;
+          const rooms =
+            Array.isArray(raw?.data?.rooms) ? raw.data.rooms :
+            Array.isArray(raw?.rooms) ? raw.rooms : [];
+          setRoomsOverview({ rooms, updated_at: raw?.data?.updated_at || raw?.updated_at });
+        }
         dormId = j?.dorm_id || null;
       }
     } catch (err) {
