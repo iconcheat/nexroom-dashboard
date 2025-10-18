@@ -10,8 +10,9 @@ export default function DashboardPage() {
   // ===== State / Context =====
   const [summary, setSummary] = useState<any | null>(null);
   const [paying, setPaying] = useState(false);
-  const [dormName, setDormName] = useState<string>('PD Place');
-  const [userName, setUserName] = useState<string>('Manager');
+  const [dormName, setDormName] = useState<string>('');
+  const [userName, setUserName] = useState<string>('');
+  const [billingPeriod, setBillingPeriod] = useState<string>('');
   const CASH_WEBHOOK = '/api/payments/cash';
   const fmtTH = (n: number) =>
     (typeof n === 'number' ? n.toLocaleString('th-TH') : String(n ?? ''));
@@ -131,6 +132,14 @@ export default function DashboardPage() {
 
   return () => { es?.close(); };
 }, []);
+  
+  useEffect(() => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = (now.getMonth() + 1).toString().padStart(2, '0'); // เดือน 2 หลัก
+  setBillingPeriod(`${y}-${m}`);
+}, []);
+
 
   // ===== Background Floating Particles =====
   useEffect(() => {
@@ -229,7 +238,7 @@ export default function DashboardPage() {
             </div>
             <div className="top-row chips">
               <div className="panel-chip glass-neon neon-rounded shine-run">หอพัก: {dormName}</div>
-              <div className="panel-chip glass-neon neon-rounded shine-run">รอบบิล: 2025-10</div>
+              <div className="panel-chip glass-neon neon-rounded shine-run">รอบบิล: {billingPeriod || '—'}</div>
               <div className="panel-chip glass-neon neon-rounded shine-run">ผู้ใช้: {userName}</div>
             </div>
           </div>
