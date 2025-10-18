@@ -5,15 +5,15 @@ import { Home, User } from 'lucide-react';
 type RawRoom = {
   room_no?: string;
   room?: string;
-  status?: string;          // reserved | occupied | vacant (หรือค่าอื่น)
-  room_status?: string;     // จากตาราง rooms
-  booking_status?: string;  // จากตาราง bookings
+  status?: string;          // reserved | occupied | vacant
+  room_status?: string;     // สถานะจากตาราง rooms
+  booking_status?: string;  // สถานะจากตาราง bookings
   tenant?: string;
   tenant_name?: string;
 };
 
 export default function RoomsOverviewPanel({ data }: { data: any }) {
-  // ---- รับได้ทุกทรง: {rooms:[]}, {data:{rooms:[]}}, [] ----
+  // รับ payload ได้หลายรูปแบบ: {rooms:[]}, {data:{rooms:[]}}, [] ฯลฯ
   const payload = data?.rooms
     ? data
     : data?.data?.rooms
@@ -37,13 +37,12 @@ export default function RoomsOverviewPanel({ data }: { data: any }) {
   };
 
   const list = rawList
-  .map((r) => ({
-    room_no: (r.room_no ?? r.room ?? '').toString().trim(), // << ครอบทั้งสองชื่อ
-    status: deriveStatus(r),
-    tenant: r.tenant ?? r.tenant_name ?? '-',
-  }))
-  .filter((r) => r.room_no !== ''); // เงื่อนไขหลวมขึ้น
-  console.log('RoomsOverviewPanel list size:', list.length, list.slice(0,3));
+    .map((r) => ({
+      room_no: (r.room_no ?? r.room ?? '').toString().trim(),
+      status: deriveStatus(r),
+      tenant: r.tenant ?? r.tenant_name ?? '-',
+    }))
+    .filter((r) => r.room_no !== '');
 
   if (!list.length) {
     return (
@@ -62,6 +61,12 @@ export default function RoomsOverviewPanel({ data }: { data: any }) {
     vacant: '#6ec1ff',
   };
 
+  // ค่าคุมการแสดง 3 แถวแล้วค่อยเลื่อน
+  const ROW_H = 104; // px: ความสูงต่อแถวของไอเท็ม (ปรับได้ตามดีไซน์จริง)
+  const GAP   = 12;  // px: ช่องว่างระหว่างการ์ด
+  const VISIBLE_ROWS = 3;
+  const MAX_H = ROW_H * VISIBLE_ROWS + GAP * (VISIBLE_ROWS - 1);
+
   return (
     <div
       className="rounded-2xl p-5"
@@ -72,6 +77,7 @@ export default function RoomsOverviewPanel({ data }: { data: any }) {
         boxShadow: '0 0 25px rgba(255,122,0,.15)',
       }}
     >
+      {/* header */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2 text-[#ffb347] font-semibold">
           <Home className="w-5 h-5" />
@@ -85,55 +91,59 @@ export default function RoomsOverviewPanel({ data }: { data: any }) {
         </div>
       </div>
 
-      <div
-        className="grid"
-        style={{
-          display: 'grid',
-          gap: 12,
-          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
-        }}
-      >
-        {list.map((r) => {
-          const color = colorByStatus[r.status] || '#bbb';
-          return (
-            <div
-              key={r.room_no}
-              className="rounded-xl p-3"
-              style={{
-                background: 'rgba(16,16,32,.55)',
-                border: '1px solid rgba(255,255,255,.12)',
-                boxShadow: `0 0 0 1px rgba(255,255,255,.06) inset, 0 0 14px ${color}22`,
-              }}
-            >
+      {/* กล่องสกรอลล์: แสดงอย่างน้อย 3 แถว ถ้าเกินให้เลื่อน */}
+      <div style={{ maxHeight: MAX_H, overflow: 'auto', paddingRight: 4 }}>
+        <div
+          className="grid"
+          style={{
+            display: 'grid',
+            gap: GAP,
+            gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+            gridAutoRows: `${ROW_H}px`,
+          }}
+        >
+          {list.map((r) => {
+            const color = colorByStatus[r.status] || '#bbb';
+            return (
               <div
-                className="text-sm font-bold mb-2"
-                style={{ color: '#ffb347' }}
-              >
-                ห้อง {r.room_no}
-              </div>
-
-              <div
-                className="inline-block text-xs font-semibold px-2 py-1 rounded-md mb-2"
+                key={r.room_no}
+                className="rounded-xl p-3"
                 style={{
-                  background: `${color}22`,
-                  color,
-                  border: `1px solid ${color}66`,
+                  background: 'rgba(16,16,32,.55)',
+                  border: '1px solid rgba(255,255,255,.12)',
+                  boxShadow: `0 0 0 1px rgba(255,255,255,.06) inset, 0 0 14px ${color}22`,
                 }}
               >
-                {r.status === 'reserved'
-                  ? 'จอง'
-                  : r.status === 'occupied'
-                  ? 'เข้าอยู่'
-                  : 'ว่าง'}
-              </div>
+                <div
+                  className="text-sm font-bold mb-2"
+                  style={{ color: '#ffb347' }}
+                >
+                  ห้อง {r.room_no}
+                </div>
 
-              <div className="flex items-center gap-2 text-xs text-gray-300">
-                <User className="w-4 h-4 opacity-70" />
-                <span>{r.tenant || '-'}</span>
+                <div
+                  className="inline-block text-xs font-semibold px-2 py-1 rounded-md mb-2"
+                  style={{
+                    background: `${color}22`,
+                    color,
+                    border: `1px solid ${color}66`,
+                  }}
+                >
+                  {r.status === 'reserved'
+                    ? 'จอง'
+                    : r.status === 'occupied'
+                    ? 'เข้าอยู่'
+                    : 'ว่าง'}
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-gray-300">
+                  <User className="w-4 h-4 opacity-70" />
+                  <span>{r.tenant || '-'}</span>
+                </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
     </div>
   );
