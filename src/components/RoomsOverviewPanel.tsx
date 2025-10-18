@@ -1,64 +1,138 @@
 'use client';
 import React from 'react';
+import { Home, User } from 'lucide-react';
 
-type RoomItem = {
-  room_no: string;
-  status: 'reserved' | 'occupied' | 'vacant';
-  display: string;
-  tenant: string;
+type RawRoom = {
+  room_no?: string;
+  room?: string;
+  status?: string;          // reserved | occupied | vacant (หรือค่าอื่น)
+  room_status?: string;     // จากตาราง rooms
+  booking_status?: string;  // จากตาราง bookings
+  tenant?: string;
+  tenant_name?: string;
 };
 
-export default function RoomsOverviewPanel({ data }: { data?: { rooms?: RoomItem[] } }) {
-  const rooms = data?.rooms || [];
-  if (!rooms.length) {
+export default function RoomsOverviewPanel({ data }: { data: any }) {
+  // ---- รับได้ทุกทรง: {rooms:[]}, {data:{rooms:[]}}, [] ----
+  const payload = data?.rooms
+    ? data
+    : data?.data?.rooms
+    ? data.data
+    : Array.isArray(data)
+    ? { rooms: data }
+    : { rooms: [] };
+
+  const rawList: RawRoom[] = Array.isArray(payload.rooms) ? payload.rooms : [];
+
+  const deriveStatus = (r: RawRoom) => {
+    const b = (r.booking_status || '').toLowerCase();
+    const rs = (r.room_status || '').toLowerCase();
+    const s = (r.status || '').toLowerCase();
+    const x = b || s || rs;
+
+    if (['reserved', 'reserve', 'booking'].includes(x)) return 'reserved';
+    if (['occupied', 'checked_in', 'active'].includes(x)) return 'occupied';
+    if (['vacant', 'available', 'empty'].includes(x)) return 'vacant';
+    return x || 'vacant';
+  };
+
+  const list = rawList
+    .map((r) => ({
+      room_no: r.room_no ?? r.room ?? '',
+      status: deriveStatus(r),
+      tenant: r.tenant ?? r.tenant_name ?? '-',
+    }))
+    .filter((r) => !!r.room_no); // กันค่าที่ไม่มีเลขห้อง
+
+  if (!list.length) {
     return (
-      <div className="p-6 text-center text-gray-400 text-sm border border-dashed rounded-lg">
+      <div
+        className="rounded-2xl p-5 border border-dashed text-center text-sm"
+        style={{ borderColor: 'rgba(255,255,255,.25)', color: '#bbb' }}
+      >
         ยังไม่มีข้อมูลห้อง
       </div>
     );
   }
 
+  const colorByStatus: Record<string, string> = {
+    reserved: '#ffb347',
+    occupied: '#21d07a',
+    vacant: '#6ec1ff',
+  };
+
   return (
-    <div className="rounded-2xl p-5 bg-[#141024] border border-white/12
-                    shadow-[0_0_18px_rgba(255,122,0,.15)]
-                    hover:shadow-[0_0_28px_rgba(255,122,0,.25)] transition">
-      <div className="text-[#ffb347] font-semibold mb-3">แผนผังห้องทั้งหมด</div>
+    <div
+      className="rounded-2xl p-5"
+      style={{
+        background:
+          'linear-gradient(135deg, rgba(255,122,0,.10), rgba(40,25,60,.60))',
+        border: '1px solid rgba(255,255,255,.12)',
+        boxShadow: '0 0 25px rgba(255,122,0,.15)',
+      }}
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2 text-[#ffb347] font-semibold">
+          <Home className="w-5 h-5" />
+          <span>ภาพรวมสถานะห้อง</span>
+        </div>
+        <div className="text-xs text-gray-300">
+          อัพเดทล่าสุด:{' '}
+          {payload.updated_at
+            ? new Date(payload.updated_at).toLocaleString('th-TH')
+            : '-'}
+        </div>
+      </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {rooms.map((r) => {
-          const color =
-            r.status === 'reserved' ? 'bg-yellow-500/15 text-yellow-300 border-yellow-400/30' :
-            r.status === 'occupied' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30' :
-            'bg-sky-500/15 text-sky-300 border-sky-400/30';
-
+      <div
+        className="grid"
+        style={{
+          display: 'grid',
+          gap: 12,
+          gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+        }}
+      >
+        {list.map((r) => {
+          const color = colorByStatus[r.status] || '#bbb';
           return (
-            <div key={r.room_no}
-                 className={`rounded-xl border ${color} p-3`}>
-              <div className="flex items-center justify-between mb-1">
-                <div className="font-extrabold tracking-wide">ห้อง {r.room_no}</div>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-white/10">
-                  {r.display}
-                </span>
+            <div
+              key={r.room_no}
+              className="rounded-xl p-3"
+              style={{
+                background: 'rgba(16,16,32,.55)',
+                border: '1px solid rgba(255,255,255,.12)',
+                boxShadow: `0 0 0 1px rgba(255,255,255,.06) inset, 0 0 14px ${color}22`,
+              }}
+            >
+              <div
+                className="text-sm font-bold mb-2"
+                style={{ color: '#ffb347' }}
+              >
+                ห้อง {r.room_no}
               </div>
-              <div className="text-sm text-gray-200 truncate">
-                ผู้เช่า: <span className="font-medium">{r.tenant || '-'}</span>
+
+              <div
+                className="inline-block text-xs font-semibold px-2 py-1 rounded-md mb-2"
+                style={{
+                  background: `${color}22`,
+                  color,
+                  border: `1px solid ${color}66`,
+                }}
+              >
+                {r.status === 'reserved'
+                  ? 'จอง'
+                  : r.status === 'occupied'
+                  ? 'เข้าอยู่'
+                  : 'ว่าง'}
+              </div>
+
+              <div className="flex items-center gap-2 text-xs text-gray-300">
+                <User className="w-4 h-4 opacity-70" />
+                <span>{r.tenant || '-'}</span>
               </div>
             </div>
           );
         })}
-      </div>
-
-      {/* Legend */}
-      <div className="mt-4 flex gap-4 text-xs text-gray-400">
-        <div className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded bg-sky-400/70" /> ว่าง
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded bg-yellow-400/70" /> จอง
-        </div>
-        <div className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded bg-emerald-400/70" /> เข้าอยู่
-        </div>
       </div>
     </div>
   );
