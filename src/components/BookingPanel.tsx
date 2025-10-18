@@ -2,22 +2,50 @@
 import React from 'react';
 import { CalendarDays, User, Home, Wallet } from 'lucide-react';
 
+// แปลงตัวเลขให้ปลอดภัย
+const num = (x: any) => (typeof x === 'number' ? x : Number(x || 0));
+// format TH
+const fmtTH = (x: any) => num(x).toLocaleString('th-TH');
+
 export default function BookingPanel({ data }: { data: any }) {
   if (!data) {
     return (
-      <div className="p-6 text-center text-gray-400 text-sm border border-dashed rounded-lg">
+      <div className="p-6 text-center text-gray-400 text-sm border border-dashed rounded-xl">
         ยังไม่มีข้อมูลการจอง
       </div>
     );
   }
 
-  const { customer = {}, money = {}, room_no, start_date, message } = data;
+  const { room_no, start_date, message } = data;
+  // รองรับทั้ง customer/tenants
+  const customer = data.customer || data.tenants || {};
+  const fullname = customer.fullname || customer.full_name || '-';
+  const phone = customer.phone || '';
+
+  const m = data.money || {};
+  // รองรับหลายชื่อคีย์จาก n8n/DB
+  const deposit = num(m.deposit ?? m.deposit_amount);
+  const firstRent = num(m.first_rent ?? m.rent_first ?? m.first_month_rent ?? m.rent_per_month);
+  const reserve = num(m.reserve ?? m.reserve_paid);
+  const mustPayToday = m.must_pay_today !== undefined
+    ? num(m.must_pay_today)
+    : Math.max(deposit + firstRent - reserve, 0);
 
   return (
-    <div className="booking-card rounded-2xl p-5 bg-gradient-to-br from-[#1b1230] to-[#120c22] border border-white/15 shadow-[0_0_25px_rgba(255,122,0,0.15)] transition-all hover:shadow-[0_0_40px_rgba(255,122,0,0.25)]">
+    <div
+      className={[
+        // พื้นหลัง/กรอบสว่างขึ้น โทนส้ม-ม่วง
+        'rounded-2xl p-5',
+        'bg-[radial-gradient(120%_140%_at_0%_0%,#2a1840_0%,#180f2c_52%,#0e0a1d_100%)]',
+        'border border-white/15',
+        'shadow-[0_0_25px_rgba(255,122,0,0.18)]',
+        'outline outline-1 outline-orange-400/20',
+        'transition-all hover:shadow-[0_0_36px_rgba(255,160,60,0.35)]',
+      ].join(' ')}
+    >
       {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-2 text-[#ff7a00] font-semibold">
+      <div className="flex justify-between items-center mb-5">
+        <div className="flex items-center gap-2 text-orange-400 font-semibold">
           <Home className="w-5 h-5" />
           <span>ห้อง {room_no || '-'}</span>
         </div>
@@ -35,42 +63,51 @@ export default function BookingPanel({ data }: { data: any }) {
         </div>
       </div>
 
-      {/* Body */}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm text-gray-200">
-        <div className="flex items-center gap-2 col-span-2">
-          <User className="w-4 h-4 text-gray-400" />
-          <span className="font-medium">{customer.fullname || '-'}</span>
-          <span className="text-gray-400 ml-1">{customer.phone || ''}</span>
+      {/* Customer */}
+      <div className="flex items-center gap-2 text-sm text-gray-100 mb-4">
+        <User className="w-4 h-4 text-gray-300" />
+        <span className="font-medium">{fullname}</span>
+        {phone ? <span className="text-gray-400">· {phone}</span> : null}
+      </div>
+
+      {/* Money blocks */}
+      <div className="grid sm:grid-cols-4 grid-cols-2 gap-3">
+        {/* มัดจำ */}
+        <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
+          <div className="text-xs text-gray-400">มัดจำ</div>
+          <div className="text-lg font-bold text-gray-100">{fmtTH(deposit)}</div>
+          <div className="text-[11px] text-gray-400">บาท</div>
         </div>
 
-        <div>
-          <span className="text-gray-400">มัดจำ:</span>{' '}
-          <span className="font-semibold text-gray-100">
-            {money.deposit?.toLocaleString() ?? 0} บาท
-          </span>
+        {/* ค่าเช่าเดือนแรก */}
+        <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
+          <div className="text-xs text-gray-400">ค่าเช่าเดือนแรก</div>
+          <div className="text-lg font-bold text-gray-100">{fmtTH(firstRent)}</div>
+          <div className="text-[11px] text-gray-400">บาท</div>
         </div>
-        <div>
-          <span className="text-gray-400">ค่าเช่าเดือนแรก:</span>{' '}
-          <span className="font-semibold text-gray-100">
-            {money.first_month_rent?.toLocaleString() ?? 0} บาท
-          </span>
+
+        {/* ยอดจอง/ชำระไว้แล้ว */}
+        <div className="rounded-xl bg-white/[0.04] border border-white/10 p-3">
+          <div className="text-xs text-gray-400">ยอดจอง</div>
+          <div className="text-lg font-bold text-gray-100">{fmtTH(reserve)}</div>
+          <div className="text-[11px] text-gray-400">บาท</div>
         </div>
-        <div>
-          <span className="text-gray-400">ยอดจอง:</span>{' '}
-          <span className="font-semibold text-gray-100">
-            {money.reserve?.toLocaleString() ?? 0} บาท
-          </span>
-        </div>
-        <div>
-          <span className="text-gray-400">ยอดรวมย้ายเข้า:</span>{' '}
-          <span className="font-semibold text-[#ffb347]">
-            {money.total_movein?.toLocaleString() ?? 0} บาท
-          </span>
+
+        {/* ยอดรวมย้ายเข้า */}
+        <div className="rounded-xl bg-gradient-to-br from-orange-500/15 to-amber-400/10 border border-orange-400/35 p-3">
+          <div className="flex items-center gap-1 text-xs text-orange-300">
+            <Wallet className="w-4 h-4" />
+            <span>ยอดรวมย้ายเข้า</span>
+          </div>
+          <div className="text-2xl font-extrabold text-orange-300 drop-shadow-sm">
+            {fmtTH(mustPayToday)}
+          </div>
+          <div className="text-[11px] text-orange-200/80">บาท</div>
         </div>
       </div>
 
       {/* Footer */}
-      <div className="mt-5 text-xs text-gray-400 border-t border-white/10 pt-3">
+      <div className="mt-5 text-xs text-gray-300/80 border-t border-white/10 pt-3">
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
     </div>
