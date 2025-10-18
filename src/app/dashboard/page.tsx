@@ -325,11 +325,6 @@ export default function DashboardPage() {
              </section>
 
              <section className="card col-6">
-               <div className="label">📅 การจองล่าสุด</div>
-               <BookingPanel data={summary} />
-             </section>
-
-             <section className="card col-6">
                <RoomsOverviewPanel data={roomsOverview} />
              </section>
 
