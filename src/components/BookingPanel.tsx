@@ -20,9 +20,9 @@ export default function BookingPanel({ data }: { data: any }) {
   const phone = customer.phone || '';
 
   const m = data.money || {};
-  const deposit   = num(m.deposit ?? m.deposit_amount);
+  const deposit = num(m.deposit ?? m.deposit_amount);
   const firstRent = num(m.first_rent ?? m.rent_first ?? m.first_month_rent ?? m.rent_per_month);
-  const reserve   = num(m.reserve ?? m.reserve_paid);
+  const reserve = num(m.reserve ?? m.reserve_paid);
   const mustPayToday =
     m.must_pay_today !== undefined
       ? num(m.must_pay_today)
@@ -31,7 +31,6 @@ export default function BookingPanel({ data }: { data: any }) {
   return (
     <div
       className={[
-        // พื้นหลัง/กรอบ + โค้งมนมากขึ้น + กันล้นบนมือถือ
         'rounded-3xl p-4 sm:p-5 overflow-hidden',
         'bg-[radial-gradient(120%_140%_at_0%_0%,#2a1840_0%,#180f2c_52%,#0e0a1d_100%)]',
         'border border-white/15',
@@ -41,14 +40,14 @@ export default function BookingPanel({ data }: { data: any }) {
       ].join(' ')}
     >
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 sm:mb-5">
+      <div className="flex justify-between items-center mb-4 sm:mb-5">
         <div className="flex items-center gap-2 text-orange-400 font-semibold">
           <Home className="w-5 h-5 shrink-0" />
-          <span className="truncate">ห้อง {room_no || '-'}</span>
+          <span>ห้อง {room_no || '-'}</span>
         </div>
         <div className="flex items-center gap-1 text-gray-300 text-xs sm:text-sm">
           <CalendarDays className="w-4 h-4 shrink-0" />
-          <span className="tabular-nums">
+          <span>
             {start_date
               ? new Date(start_date).toLocaleDateString('th-TH', {
                   day: '2-digit',
@@ -63,67 +62,83 @@ export default function BookingPanel({ data }: { data: any }) {
       {/* Customer */}
       <div className="flex items-center gap-2 text-sm text-gray-100 mb-4">
         <User className="w-4 h-4 text-gray-300 shrink-0" />
-        <span className="font-medium truncate">{fullname}</span>
+        <span className="font-medium">{fullname}</span>
         {phone ? <span className="text-gray-400">· {phone}</span> : null}
       </div>
 
       {/* Money blocks */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {/* มัดจำ */}
-        <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-3 min-w-0">
-          <div className="text-xs text-gray-400">มัดจำ</div>
-          <div className="text-xl sm:text-2xl font-bold text-gray-100 tabular-nums break-words">
-            {fmtTH(deposit)}
-          </div>
-          <div className="text-[11px] text-gray-400">บาท</div>
-        </div>
-
+        <MoneyBlock label="มัดจำ" value={fmtTH(deposit)} highlight={false} />
         {/* ค่าเช่าเดือนแรก */}
-        <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-3 min-w-0">
-          <div className="text-xs text-gray-400">ค่าเช่าเดือนแรก</div>
-          <div className="text-xl sm:text-2xl font-bold text-gray-100 tabular-nums break-words">
-            {fmtTH(firstRent)}
-          </div>
-          <div className="text-[11px] text-gray-400">บาท</div>
-        </div>
-
+        <MoneyBlock label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} highlight={false} />
         {/* ยอดจอง */}
-        <div className="rounded-2xl bg-white/[0.04] border border-white/10 p-3 min-w-0">
-          <div className="text-xs text-gray-400">ยอดจอง</div>
-          <div className="text-xl sm:text-2xl font-bold text-gray-100 tabular-nums break-words">
-            {fmtTH(reserve)}
-          </div>
-          <div className="text-[11px] text-gray-400">บาท</div>
-        </div>
-
-        {/* ยอดรวมย้ายเข้า (ขยาย 2 คอลัมน์บนจอเล็ก/กลาง เพื่อไม่ชิดขอบ) */}
-        <div className="rounded-2xl bg-gradient-to-br from-orange-500/15 to-amber-400/10 border border-orange-400/35 p-3 min-w-0 sm:col-span-2 lg:col-span-1 relative overflow-hidden">
-          <div className="flex items-center gap-1 text-xs text-orange-300">
-            <Wallet className="w-4 h-4 shrink-0" />
-            <span>ยอดรวมย้ายเข้า</span>
-          </div>
-          <div className="text-2xl sm:text-3xl font-extrabold text-orange-300 drop-shadow-sm tabular-nums break-words">
-            {fmtTH(mustPayToday)}
-          </div>
-          <div className="text-[11px] text-orange-200/80">บาท</div>
-
-          {/* แสงวิ่งเพิ่มมิติ */}
-          <span className="pointer-events-none absolute -left-24 top-0 bottom-0 w-24 rotate-6 bg-gradient-to-r from-transparent via-white/30 to-transparent blur-md animate-[shine_3.8s_linear_infinite]" />
-        </div>
+        <MoneyBlock label="ยอดจอง" value={fmtTH(reserve)} highlight={false} />
+        {/* ยอดรวมย้ายเข้า */}
+        <MoneyBlock
+          label="ยอดรวมย้ายเข้า"
+          value={fmtTH(mustPayToday)}
+          highlight
+          icon={<Wallet className="w-4 h-4" />}
+        />
       </div>
 
       {/* Footer */}
       <div className="mt-5 text-xs text-gray-300/80 border-t border-white/10 pt-3">
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
+    </div>
+  );
+}
 
-      {/* keyframes สำหรับแสงวิ่ง */}
-      <style jsx>{`
-        @keyframes shine {
-          0% { transform: translateX(0) rotate(6deg); }
-          100% { transform: translateX(140%) rotate(6deg); }
-        }
-      `}</style>
+function MoneyBlock({
+  label,
+  value,
+  highlight,
+  icon,
+}: {
+  label: string;
+  value: string | number;
+  highlight?: boolean;
+  icon?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={[
+        'rounded-2xl p-3 sm:p-4 min-w-0 overflow-hidden',
+        highlight
+          ? 'bg-gradient-to-br from-orange-500/15 to-amber-400/10 border border-orange-400/35'
+          : 'bg-white/[0.04] border border-white/10',
+        'flex flex-col justify-center',
+      ].join(' ')}
+    >
+      <div
+        className={[
+          'flex items-center gap-1 text-xs sm:text-sm',
+          highlight ? 'text-orange-300' : 'text-gray-400',
+        ].join(' ')}
+      >
+        {icon || null}
+        <span>{label}</span>
+      </div>
+      <div
+        className={[
+          'font-extrabold tracking-tight tabular-nums break-words leading-tight',
+          highlight
+            ? 'text-orange-300 text-2xl sm:text-3xl'
+            : 'text-gray-100 text-xl sm:text-2xl',
+        ].join(' ')}
+      >
+        {value}
+      </div>
+      <div
+        className={[
+          'text-[11px] sm:text-xs',
+          highlight ? 'text-orange-200/80' : 'text-gray-400',
+        ].join(' ')}
+      >
+        บาท
+      </div>
     </div>
   );
 }
