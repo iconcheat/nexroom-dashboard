@@ -2,6 +2,7 @@
 import React from 'react';
 import { CalendarDays, User, Home, Wallet } from 'lucide-react';
 
+// แปลงตัวเลขให้ปลอดภัย + format TH
 const num = (x: any) => (typeof x === 'number' ? x : Number(x || 0));
 const fmtTH = (x: any) => num(x).toLocaleString('th-TH');
 
@@ -67,14 +68,14 @@ export default function BookingPanel({ data }: { data: any }) {
       </div>
 
       {/* Money blocks: มือถือ 2 คอลัมน์ (2 แถว), เดสก์ท็อป 4 คอลัมน์ */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* แถว 1 */}
-        <MoneyBlock label="มัดจำ" value={fmtTH(deposit)} />
-        <MoneyBlock label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* แถวที่ 1 */}
+        <Block label="มัดจำ" value={fmtTH(deposit)} />
+        <Block label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
 
-        {/* แถว 2 */}
-        <MoneyBlock label="ยอดจอง" value={fmtTH(reserve)} />
-        <MoneyBlock
+        {/* แถวที่ 2 */}
+        <Block label="ยอดจอง" value={fmtTH(reserve)} />
+        <Block
           label="ยอดรวมย้ายเข้า"
           value={fmtTH(mustPayToday)}
           highlight
@@ -90,16 +91,16 @@ export default function BookingPanel({ data }: { data: any }) {
       {/* keyframes สำหรับแสงวูบวาบ */}
       <style jsx>{`
         @keyframes shine {
-          0% { transform: translateX(-80%) skewX(-20deg); }
-          100% { transform: translateX(180%) skewX(-20deg); }
+          0%   { transform: translateX(-80%) skewX(-20deg); }
+          100% { transform: translateX(180%)  skewX(-20deg); }
         }
       `}</style>
     </div>
   );
 }
 
-/** ---- Sub component ---- */
-function MoneyBlock({
+/* ---------- Sub component ---------- */
+function Block({
   label,
   value,
   highlight = false,
@@ -130,7 +131,7 @@ function MoneyBlock({
         <span>{label}</span>
       </div>
 
-      {/* บังคับไม่ตัดบรรทัดกันตัวเลขแตกเป็นเสา */}
+      {/* ไม่ให้ตัวเลขตัดบรรทัด/เป็นเสา */}
       <div
         className={[
           'font-extrabold tracking-tight tabular-nums leading-tight whitespace-nowrap',
