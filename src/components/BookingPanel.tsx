@@ -2,8 +2,8 @@
 import React from 'react';
 import { CalendarDays, User, Home, Wallet } from 'lucide-react';
 
-// ---- helpers (เดิม) ----
-const num   = (x: any) => (typeof x === 'number' ? x : Number(x || 0));
+// helpers (เดิม)
+const num = (x: any) => (typeof x === 'number' ? x : Number(x || 0));
 const fmtTH = (x: any) => num(x).toLocaleString('th-TH');
 
 export default function BookingPanel({ data }: { data: any }) {
@@ -18,7 +18,7 @@ export default function BookingPanel({ data }: { data: any }) {
   const { room_no, start_date, message } = data;
   const customer = data.customer || data.tenants || {};
   const fullname = customer.fullname || customer.full_name || '-';
-  const phone    = customer.phone || '';
+  const phone = customer.phone || '';
 
   const m = data.money || {};
   const deposit   = num(m.deposit ?? m.deposit_amount);
@@ -32,24 +32,26 @@ export default function BookingPanel({ data }: { data: any }) {
   return (
     <div
       className={[
-        'rounded-3xl p-4 sm:p-5 overflow-hidden',
+        // พื้นหลังเดิมโทนม่วงเข้ม
+        'rounded-3xl p-4 md:p-5 overflow-hidden',
         'bg-[radial-gradient(120%_140%_at_0%_0%,#2a1840_0%,#180f2c_52%,#0e0a1d_100%)]',
-        'border border-white/15 shadow-[0_0_25px_rgba(255,122,0,0.18)]',
-        'outline outline-1 outline-orange-400/20',
+        'border border-white/15 shadow-[0_0_25px_rgba(255,122,0,0.18)] outline outline-1 outline-orange-400/20',
       ].join(' ')}
     >
       {/* Header */}
-      <div className="flex justify-between items-center mb-4 sm:mb-5">
+      <div className="flex justify-between items-center mb-4 md:mb-5">
         <div className="flex items-center gap-2 text-orange-400 font-semibold">
           <Home className="w-5 h-5 shrink-0" />
           <span>ห้อง {room_no || '-'}</span>
         </div>
-        <div className="flex items-center gap-1 text-gray-300 text-xs sm:text-sm">
+        <div className="flex items-center gap-1 text-gray-300 text-xs md:text-sm">
           <CalendarDays className="w-4 h-4 shrink-0" />
           <span>
             {start_date
               ? new Date(start_date).toLocaleDateString('th-TH', {
-                  day: '2-digit', month: 'short', year: 'numeric',
+                  day: '2-digit',
+                  month: 'short',
+                  year: 'numeric',
                 })
               : '-'}
           </span>
@@ -63,10 +65,12 @@ export default function BookingPanel({ data }: { data: any }) {
         {phone ? <span className="text-gray-400">· {phone}</span> : null}
       </div>
 
-      {/* Money blocks: มือถือ 2 คอลัมน์ (2 แถว) / เดสก์ท็อป 4 คอลัมน์ */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {/* Money cards: desktop 4 คอลัมน์, mobile 2x2 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        {/* แถว 1 */}
         <MoneyCard label="มัดจำ" value={fmtTH(deposit)} />
         <MoneyCard label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
+        {/* แถว 2 */}
         <MoneyCard label="ยอดจอง" value={fmtTH(reserve)} />
         <MoneyCard
           label="ยอดรวมย้ายเข้า"
@@ -81,7 +85,7 @@ export default function BookingPanel({ data }: { data: any }) {
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
 
-      {/* shine keyframes */}
+      {/* keyframes สำหรับแสง */}
       <style jsx>{`
         @keyframes shine {
           0%   { transform: translateX(-80%) skewX(-20deg); }
@@ -92,7 +96,7 @@ export default function BookingPanel({ data }: { data: any }) {
   );
 }
 
-/* ---------- Sub component: กล่องสี่เหลี่ยมโค้งมนอ่านง่าย ---------- */
+/* ---------- Card ---------- */
 function MoneyCard({
   label,
   value,
@@ -104,41 +108,43 @@ function MoneyCard({
   highlight?: boolean;
   icon?: React.ReactNode;
 }) {
+  // พื้นส้ม–น้ำตาล + กรอบนุ่ม ๆ ให้เข้าธีม
+  const base =
+    'rounded-2xl p-4 min-h-[108px] relative overflow-hidden flex flex-col justify-between min-w-0';
+  const normal =
+    'bg-[linear-gradient(145deg,rgba(90,55,35,0.35),rgba(40,25,18,0.30))] border border-[rgba(255,180,120,0.28)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.05),0_8px_16px_rgba(0,0,0,.25)]';
+  const high =
+    'bg-[linear-gradient(145deg,rgba(255,145,60,0.20),rgba(110,60,30,0.22))] border border-orange-400/45 shadow-[0_0_18px_rgba(255,140,60,.35)]';
+
   return (
-    <div
-      className={[
-        'rounded-2xl p-4 min-h-[96px] relative overflow-hidden',
-        'flex flex-col justify-between',
-        highlight
-          ? 'bg-gradient-to-br from-orange-500/16 to-amber-400/12 border border-orange-400/35'
-          : 'bg-white/[0.05] border border-white/10',
-      ].join(' ')}
-    >
+    <div className={[base, highlight ? high : normal].join(' ')}>
       <div className={['flex items-center gap-1 text-xs',
-        highlight ? 'text-orange-300' : 'text-gray-400',
+        highlight ? 'text-orange-200' : 'text-amber-200/80',
       ].join(' ')}>
         {icon || null}
         <span className="leading-none">{label}</span>
       </div>
 
-      <div className={[
-        'font-extrabold tabular-nums leading-none whitespace-nowrap',
-        highlight ? 'text-orange-300 text-3xl md:text-4xl'
-                  : 'text-gray-100 text-2xl md:text-3xl',
-      ].join(' ')}>
+      {/* ตัวเลขสีขาว ชัด และไม่ล้น */}
+      <div
+        className={[
+          'text-white font-extrabold tabular-nums leading-tight whitespace-nowrap',
+          highlight ? 'text-3xl md:text-4xl' : 'text-2xl md:text-3xl',
+        ].join(' ')}
+      >
         {value}
       </div>
 
       <div className={['text-[11px] md:text-xs leading-none',
-        highlight ? 'text-orange-200/80' : 'text-gray-400',
+        highlight ? 'text-orange-200/80' : 'text-amber-200/70',
       ].join(' ')}>
         บาท
       </div>
 
-      {/* แสงวูบวาบเฉพาะกล่อง highlight */}
+      {/* แสงวูบวาบเฉพาะ highlight */}
       {highlight && (
         <span
-          className="pointer-events-none absolute inset-y-0 -left-24 w-28 bg-gradient-to-r from-transparent via-white/35 to-transparent blur-md"
+          className="pointer-events-none absolute inset-y-0 -left-24 w-28 bg-gradient-to-r from-transparent via-white/40 to-transparent blur-md"
           style={{ animation: 'shine 3.6s linear infinite' }}
         />
       )}
