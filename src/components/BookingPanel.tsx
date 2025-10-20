@@ -20,9 +20,9 @@ export default function BookingPanel({ data }: { data: any }) {
   const phone = customer.phone || '';
 
   const m = data.money || {};
-  const deposit = num(m.deposit ?? m.deposit_amount);
+  const deposit   = num(m.deposit ?? m.deposit_amount);
   const firstRent = num(m.first_rent ?? m.rent_first ?? m.first_month_rent ?? m.rent_per_month);
-  const reserve = num(m.reserve ?? m.reserve_paid);
+  const reserve   = num(m.reserve ?? m.reserve_paid);
   const mustPayToday =
     m.must_pay_today !== undefined
       ? num(m.must_pay_today)
@@ -66,15 +66,14 @@ export default function BookingPanel({ data }: { data: any }) {
         {phone ? <span className="text-gray-400">· {phone}</span> : null}
       </div>
 
-      {/* Money blocks */}
-      <div className="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {/* มัดจำ */}
-        <MoneyBlock label="มัดจำ" value={fmtTH(deposit)} highlight={false} />
-        {/* ค่าเช่าเดือนแรก */}
-        <MoneyBlock label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} highlight={false} />
-        {/* ยอดจอง */}
-        <MoneyBlock label="ยอดจอง" value={fmtTH(reserve)} highlight={false} />
-        {/* ยอดรวมย้ายเข้า */}
+      {/* Money blocks: มือถือ 2 คอลัมน์ (2 แถว), เดสก์ท็อป 4 คอลัมน์ */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* แถว 1 */}
+        <MoneyBlock label="มัดจำ" value={fmtTH(deposit)} />
+        <MoneyBlock label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
+
+        {/* แถว 2 */}
+        <MoneyBlock label="ยอดจอง" value={fmtTH(reserve)} />
         <MoneyBlock
           label="ยอดรวมย้ายเข้า"
           value={fmtTH(mustPayToday)}
@@ -87,14 +86,23 @@ export default function BookingPanel({ data }: { data: any }) {
       <div className="mt-5 text-xs text-gray-300/80 border-t border-white/10 pt-3">
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
+
+      {/* keyframes สำหรับแสงวูบวาบ */}
+      <style jsx>{`
+        @keyframes shine {
+          0% { transform: translateX(-80%) skewX(-20deg); }
+          100% { transform: translateX(180%) skewX(-20deg); }
+        }
+      `}</style>
     </div>
   );
 }
 
+/** ---- Sub component ---- */
 function MoneyBlock({
   label,
   value,
-  highlight,
+  highlight = false,
   icon,
 }: {
   label: string;
@@ -105,7 +113,7 @@ function MoneyBlock({
   return (
     <div
       className={[
-        'rounded-2xl p-3 sm:p-4 min-w-0 overflow-hidden',
+        'rounded-2xl p-3 sm:p-4 min-w-0 relative overflow-hidden',
         highlight
           ? 'bg-gradient-to-br from-orange-500/15 to-amber-400/10 border border-orange-400/35'
           : 'bg-white/[0.04] border border-white/10',
@@ -121,9 +129,11 @@ function MoneyBlock({
         {icon || null}
         <span>{label}</span>
       </div>
+
+      {/* บังคับไม่ตัดบรรทัดกันตัวเลขแตกเป็นเสา */}
       <div
         className={[
-          'font-extrabold tracking-tight tabular-nums break-words leading-tight',
+          'font-extrabold tracking-tight tabular-nums leading-tight whitespace-nowrap',
           highlight
             ? 'text-orange-300 text-2xl sm:text-3xl'
             : 'text-gray-100 text-xl sm:text-2xl',
@@ -131,6 +141,7 @@ function MoneyBlock({
       >
         {value}
       </div>
+
       <div
         className={[
           'text-[11px] sm:text-xs',
@@ -139,6 +150,14 @@ function MoneyBlock({
       >
         บาท
       </div>
+
+      {/* แสงวูบวาบเฉพาะกล่อง highlight */}
+      {highlight && (
+        <span
+          className="pointer-events-none absolute inset-y-0 -left-24 w-28 bg-gradient-to-r from-transparent via-white/35 to-transparent blur-md"
+          style={{ animation: 'shine 3.6s linear infinite' }}
+        />
+      )}
     </div>
   );
 }
