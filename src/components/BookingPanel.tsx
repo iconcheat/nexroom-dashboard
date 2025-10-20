@@ -18,11 +18,12 @@ export default function BookingPanel({data}:{data:any}){
 
       {/* GRID: มือถือ 2x2, เดสก์ท็อป 4 ใบ ไม่ซ้อน ไม่ล้น */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5 w-full">
-        <Card label="มัดจำ" value={fmtTH(deposit)}/>
-        <Card label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)}/>
-        <div className="col-span-full"></div>
-        <Card label="ยอดจอง" value={fmtTH(reserve)}/>
-        <Card label="ยอดรวมย้ายเข้า" value={fmtTH(mustPayToday)} highlight/>
+        <Card label="มัดจำ" value={fmtTH(deposit)} />
+        <Card label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
+        <div className="grid grid-cols-2 gap-4 col-span-2 md:contents">
+          <Card label="ยอดจอง" value={fmtTH(reserve)} />
+          <Card label="ยอดรวมย้ายเข้า" value={fmtTH(mustPayToday)} highlight />
+         </div>
       </div>
 
       <div className="mt-5 text-xs text-gray-300/80 border-t border-white/10 pt-3">{message||'บันทึกการจองสำเร็จ'}</div>
