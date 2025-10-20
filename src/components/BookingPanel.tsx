@@ -2,8 +2,8 @@
 import React from 'react';
 import { CalendarDays, User, Home, Wallet } from 'lucide-react';
 
-// แปลงตัวเลขให้ปลอดภัย + format TH
-const num = (x: any) => (typeof x === 'number' ? x : Number(x || 0));
+// ---- helpers (เดิม) ----
+const num   = (x: any) => (typeof x === 'number' ? x : Number(x || 0));
 const fmtTH = (x: any) => num(x).toLocaleString('th-TH');
 
 export default function BookingPanel({ data }: { data: any }) {
@@ -18,7 +18,7 @@ export default function BookingPanel({ data }: { data: any }) {
   const { room_no, start_date, message } = data;
   const customer = data.customer || data.tenants || {};
   const fullname = customer.fullname || customer.full_name || '-';
-  const phone = customer.phone || '';
+  const phone    = customer.phone || '';
 
   const m = data.money || {};
   const deposit   = num(m.deposit ?? m.deposit_amount);
@@ -34,10 +34,8 @@ export default function BookingPanel({ data }: { data: any }) {
       className={[
         'rounded-3xl p-4 sm:p-5 overflow-hidden',
         'bg-[radial-gradient(120%_140%_at_0%_0%,#2a1840_0%,#180f2c_52%,#0e0a1d_100%)]',
-        'border border-white/15',
-        'shadow-[0_0_25px_rgba(255,122,0,0.18)]',
+        'border border-white/15 shadow-[0_0_25px_rgba(255,122,0,0.18)]',
         'outline outline-1 outline-orange-400/20',
-        'transition-all hover:shadow-[0_0_36px_rgba(255,160,60,0.35)]',
       ].join(' ')}
     >
       {/* Header */}
@@ -51,9 +49,7 @@ export default function BookingPanel({ data }: { data: any }) {
           <span>
             {start_date
               ? new Date(start_date).toLocaleDateString('th-TH', {
-                  day: '2-digit',
-                  month: 'short',
-                  year: 'numeric',
+                  day: '2-digit', month: 'short', year: 'numeric',
                 })
               : '-'}
           </span>
@@ -67,15 +63,12 @@ export default function BookingPanel({ data }: { data: any }) {
         {phone ? <span className="text-gray-400">· {phone}</span> : null}
       </div>
 
-      {/* Money blocks: มือถือ 2 คอลัมน์ (2 แถว), เดสก์ท็อป 4 คอลัมน์ */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {/* แถวที่ 1 */}
-        <Block label="มัดจำ" value={fmtTH(deposit)} />
-        <Block label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
-
-        {/* แถวที่ 2 */}
-        <Block label="ยอดจอง" value={fmtTH(reserve)} />
-        <Block
+      {/* Money blocks: มือถือ 2 คอลัมน์ (2 แถว) / เดสก์ท็อป 4 คอลัมน์ */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <MoneyCard label="มัดจำ" value={fmtTH(deposit)} />
+        <MoneyCard label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
+        <MoneyCard label="ยอดจอง" value={fmtTH(reserve)} />
+        <MoneyCard
           label="ยอดรวมย้ายเข้า"
           value={fmtTH(mustPayToday)}
           highlight
@@ -88,7 +81,7 @@ export default function BookingPanel({ data }: { data: any }) {
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
 
-      {/* keyframes สำหรับแสงวูบวาบ */}
+      {/* shine keyframes */}
       <style jsx>{`
         @keyframes shine {
           0%   { transform: translateX(-80%) skewX(-20deg); }
@@ -99,8 +92,8 @@ export default function BookingPanel({ data }: { data: any }) {
   );
 }
 
-/* ---------- Sub component ---------- */
-function Block({
+/* ---------- Sub component: กล่องสี่เหลี่ยมโค้งมนอ่านง่าย ---------- */
+function MoneyCard({
   label,
   value,
   highlight = false,
@@ -114,41 +107,31 @@ function Block({
   return (
     <div
       className={[
-        'rounded-2xl p-3 sm:p-4 min-w-0 relative overflow-hidden',
+        'rounded-2xl p-4 min-h-[96px] relative overflow-hidden',
+        'flex flex-col justify-between',
         highlight
-          ? 'bg-gradient-to-br from-orange-500/15 to-amber-400/10 border border-orange-400/35'
-          : 'bg-white/[0.04] border border-white/10',
-        'flex flex-col justify-center',
+          ? 'bg-gradient-to-br from-orange-500/16 to-amber-400/12 border border-orange-400/35'
+          : 'bg-white/[0.05] border border-white/10',
       ].join(' ')}
     >
-      <div
-        className={[
-          'flex items-center gap-1 text-xs sm:text-sm',
-          highlight ? 'text-orange-300' : 'text-gray-400',
-        ].join(' ')}
-      >
+      <div className={['flex items-center gap-1 text-xs',
+        highlight ? 'text-orange-300' : 'text-gray-400',
+      ].join(' ')}>
         {icon || null}
-        <span>{label}</span>
+        <span className="leading-none">{label}</span>
       </div>
 
-      {/* ไม่ให้ตัวเลขตัดบรรทัด/เป็นเสา */}
-      <div
-        className={[
-          'font-extrabold tracking-tight tabular-nums leading-tight whitespace-nowrap',
-          highlight
-            ? 'text-orange-300 text-2xl sm:text-3xl'
-            : 'text-gray-100 text-xl sm:text-2xl',
-        ].join(' ')}
-      >
+      <div className={[
+        'font-extrabold tabular-nums leading-none whitespace-nowrap',
+        highlight ? 'text-orange-300 text-3xl md:text-4xl'
+                  : 'text-gray-100 text-2xl md:text-3xl',
+      ].join(' ')}>
         {value}
       </div>
 
-      <div
-        className={[
-          'text-[11px] sm:text-xs',
-          highlight ? 'text-orange-200/80' : 'text-gray-400',
-        ].join(' ')}
-      >
+      <div className={['text-[11px] md:text-xs leading-none',
+        highlight ? 'text-orange-200/80' : 'text-gray-400',
+      ].join(' ')}>
         บาท
       </div>
 
