@@ -32,17 +32,16 @@ export default function BookingPanel({ data }: { data: any }) {
   return (
     <div
       className={[
-        // พื้นหลังเดิมโทนม่วงเข้ม
-        'rounded-3xl p-4 md:p-5 overflow-hidden',
+        'rounded-3xl p-4 md:p-5 overflow-visible w-full', // overflow-visible กันเลขโดนตัดที่ขอบการ์ด
         'bg-[radial-gradient(120%_140%_at_0%_0%,#2a1840_0%,#180f2c_52%,#0e0a1d_100%)]',
         'border border-white/15 shadow-[0_0_25px_rgba(255,122,0,0.18)] outline outline-1 outline-orange-400/20',
       ].join(' ')}
     >
       {/* Header */}
       <div className="flex justify-between items-center mb-4 md:mb-5">
-        <div className="flex items-center gap-2 text-orange-400 font-semibold">
+        <div className="flex items-center gap-2 text-orange-400 font-semibold min-w-0">
           <Home className="w-5 h-5 shrink-0" />
-          <span>ห้อง {room_no || '-'}</span>
+          <span className="truncate">ห้อง {room_no || '-'}</span>
         </div>
         <div className="flex items-center gap-1 text-gray-300 text-xs md:text-sm">
           <CalendarDays className="w-4 h-4 shrink-0" />
@@ -59,18 +58,23 @@ export default function BookingPanel({ data }: { data: any }) {
       </div>
 
       {/* Customer */}
-      <div className="flex items-center gap-2 text-sm text-gray-100 mb-4">
+      <div className="flex items-center gap-2 text-sm text-gray-100 mb-4 min-w-0">
         <User className="w-4 h-4 text-gray-300 shrink-0" />
-        <span className="font-medium">{fullname}</span>
-        {phone ? <span className="text-gray-400">· {phone}</span> : null}
+        <span className="font-medium truncate">{fullname}</span>
+        {phone ? <span className="text-gray-400 shrink-0">· {phone}</span> : null}
       </div>
 
-      {/* Money cards: desktop 4 คอลัมน์, mobile 2x2 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* แถว 1 */}
+      {/* Money cards: mobile 2x2, desktop 4 คอลัมน์ */}
+      <div
+        className={[
+          // บังคับ 2 คอลัมน์บนมือถือ, 4 คอลัมน์ตั้งแต่ md ขึ้นไป
+          'grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4',
+          // ทำให้คอลัมน์รับพื้นที่เท่า ๆ กัน และการ์ดไม่หดจนกลายเป็นแท่งแคบ
+          '[&>*]:min-w-0 auto-rows-fr',
+        ].join(' ')}
+      >
         <MoneyCard label="มัดจำ" value={fmtTH(deposit)} />
         <MoneyCard label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
-        {/* แถว 2 */}
         <MoneyCard label="ยอดจอง" value={fmtTH(reserve)} />
         <MoneyCard
           label="ยอดรวมย้ายเข้า"
@@ -85,12 +89,9 @@ export default function BookingPanel({ data }: { data: any }) {
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
 
-      {/* keyframes สำหรับแสง */}
       <style jsx>{`
-        @keyframes shine {
-          0%   { transform: translateX(-80%) skewX(-20deg); }
-          100% { transform: translateX(180%)  skewX(-20deg); }
-        }
+        @keyframes shine { 0% { transform: translateX(-80%) skewX(-20deg); }
+                           100% { transform: translateX(180%) skewX(-20deg); } }
       `}</style>
     </div>
   );
@@ -108,9 +109,13 @@ function MoneyCard({
   highlight?: boolean;
   icon?: React.ReactNode;
 }) {
-  // พื้นส้ม–น้ำตาล + กรอบนุ่ม ๆ ให้เข้าธีม
+  // หมายเหตุ:
+  // - ใช้ aspect และ padding ให้การ์ด “ดูหนา” เหมือนเดสก์ท็อปบนมือถือ
+  // - ใช้ clamp() ให้ขนาดตัวเลขยืดหยุ่น ไม่ล้น และไม่เล็กเกินไป
+  // - min-w-0 ป้องกันไม่ให้ grid บีบการ์ดจนกลายเป็นเสาแคบ
+
   const base =
-    'rounded-2xl p-4 min-h-[108px] relative overflow-hidden flex flex-col justify-between min-w-0';
+    'rounded-2xl p-3 sm:p-4 aspect-[7/5] w-full relative overflow-hidden flex flex-col justify-between min-w-0';
   const normal =
     'bg-[linear-gradient(145deg,rgba(90,55,35,0.35),rgba(40,25,18,0.30))] border border-[rgba(255,180,120,0.28)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.05),0_8px_16px_rgba(0,0,0,.25)]';
   const high =
@@ -118,30 +123,42 @@ function MoneyCard({
 
   return (
     <div className={[base, highlight ? high : normal].join(' ')}>
-      <div className={['flex items-center gap-1 text-xs',
-        highlight ? 'text-orange-200' : 'text-amber-200/80',
-      ].join(' ')}>
+      {/* หัวการ์ด */}
+      <div
+        className={[
+          'flex items-center gap-1 text-[11px] sm:text-xs leading-none',
+          highlight ? 'text-orange-200' : 'text-amber-200/80',
+        ].join(' ')}
+      >
         {icon || null}
-        <span className="leading-none">{label}</span>
+        <span className="truncate">{label}</span>
       </div>
 
-      {/* ตัวเลขสีขาว ชัด และไม่ล้น */}
+      {/* ตัวเลข — ปรับขนาดอัตโนมัติไม่ล้น/ไม่ตกขอบ */}
       <div
         className={[
           'text-white font-extrabold tabular-nums leading-tight whitespace-nowrap',
-          highlight ? 'text-3xl md:text-4xl' : 'text-2xl md:text-3xl',
+          // ปรับด้วย clamp: มือถือจะใหญ่ขึ้นตามความกว้าง, เดสก์ท็อปไม่เกินเพดาน
+          highlight
+            ? 'text-[clamp(24px,6vw,40px)] md:text-[clamp(28px,3.2vw,44px)]'
+            : 'text-[clamp(20px,5vw,32px)] md:text-[clamp(24px,2.8vw,36px)]',
         ].join(' ')}
+        style={{ paddingRight: 2 }} // กันโดนขอบขวาตัด 1–2px
       >
         {value}
       </div>
 
-      <div className={['text-[11px] md:text-xs leading-none',
-        highlight ? 'text-orange-200/80' : 'text-amber-200/70',
-      ].join(' ')}>
+      {/* หน่วย */}
+      <div
+        className={[
+          'text-[10px] sm:text-[11px] md:text-xs leading-none',
+          highlight ? 'text-orange-200/80' : 'text-amber-200/70',
+        ].join(' ')}
+      >
         บาท
       </div>
 
-      {/* แสงวูบวาบเฉพาะ highlight */}
+      {/* แสงเฉพาะ highlight */}
       {highlight && (
         <span
           className="pointer-events-none absolute inset-y-0 -left-24 w-28 bg-gradient-to-r from-transparent via-white/40 to-transparent blur-md"
