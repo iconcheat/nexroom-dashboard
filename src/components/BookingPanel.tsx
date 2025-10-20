@@ -32,7 +32,7 @@ export default function BookingPanel({ data }: { data: any }) {
   return (
     <div
       className={[
-        'rounded-3xl p-4 md:p-5 overflow-visible w-full', // overflow-visible กันเลขโดนตัดที่ขอบการ์ด
+        'rounded-3xl p-4 md:p-5 w-full',
         'bg-[radial-gradient(120%_140%_at_0%_0%,#2a1840_0%,#180f2c_52%,#0e0a1d_100%)]',
         'border border-white/15 shadow-[0_0_25px_rgba(255,122,0,0.18)] outline outline-1 outline-orange-400/20',
       ].join(' ')}
@@ -48,9 +48,7 @@ export default function BookingPanel({ data }: { data: any }) {
           <span>
             {start_date
               ? new Date(start_date).toLocaleDateString('th-TH', {
-                  day: '2-digit',
-                  month: 'short',
-                  year: 'numeric',
+                  day: '2-digit', month: 'short', year: 'numeric',
                 })
               : '-'}
           </span>
@@ -65,14 +63,7 @@ export default function BookingPanel({ data }: { data: any }) {
       </div>
 
       {/* Money cards: mobile 2x2, desktop 4 คอลัมน์ */}
-      <div
-        className={[
-          // บังคับ 2 คอลัมน์บนมือถือ, 4 คอลัมน์ตั้งแต่ md ขึ้นไป
-          'grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4',
-          // ทำให้คอลัมน์รับพื้นที่เท่า ๆ กัน และการ์ดไม่หดจนกลายเป็นแท่งแคบ
-          '[&>*]:min-w-0 auto-rows-fr',
-        ].join(' ')}
-      >
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 [&>*]:min-w-0">
         <MoneyCard label="มัดจำ" value={fmtTH(deposit)} />
         <MoneyCard label="ค่าเช่าเดือนแรก" value={fmtTH(firstRent)} />
         <MoneyCard label="ยอดจอง" value={fmtTH(reserve)} />
@@ -89,9 +80,13 @@ export default function BookingPanel({ data }: { data: any }) {
         {message || 'บันทึกการจองสำเร็จ'}
       </div>
 
+      {/* เอฟเฟกต์แสงสำหรับ highlight (เฉพาะจอ md ขึ้นไป เพื่อกันปัญหาจอเล็ก) */}
       <style jsx>{`
-        @keyframes shine { 0% { transform: translateX(-80%) skewX(-20deg); }
-                           100% { transform: translateX(180%) skewX(-20deg); } }
+        @keyframes shine {
+          0%   { transform: translateX(-60%) skewX(-20deg); opacity: .0; }
+          20%  { opacity: .45; }
+          100% { transform: translateX(160%) skewX(-20deg); opacity: 0; }
+        }
       `}</style>
     </div>
   );
@@ -109,24 +104,21 @@ function MoneyCard({
   highlight?: boolean;
   icon?: React.ReactNode;
 }) {
-  // หมายเหตุ:
-  // - ใช้ aspect และ padding ให้การ์ด “ดูหนา” เหมือนเดสก์ท็อปบนมือถือ
-  // - ใช้ clamp() ให้ขนาดตัวเลขยืดหยุ่น ไม่ล้น และไม่เล็กเกินไป
-  // - min-w-0 ป้องกันไม่ให้ grid บีบการ์ดจนกลายเป็นเสาแคบ
-
+  // ดีไซน์ใหม่: การ์ดไม่ใช้อัตราส่วนตายตัว (เลี่ยงกลายเป็นวงกลม)
+  // ใช้ min-h + clamp ฟอนต์ ป้องกันเลขล้น/หาย ทั้งมือถือ/แท็บเล็ต/เดสก์ท็อป
   const base =
-    'rounded-2xl p-3 sm:p-4 aspect-[7/5] w-full relative overflow-hidden flex flex-col justify-between min-w-0';
+    'rounded-2xl p-3 md:p-4 min-h-[108px] md:min-h-[120px] relative overflow-hidden flex flex-col justify-between bg-clip-padding';
   const normal =
     'bg-[linear-gradient(145deg,rgba(90,55,35,0.35),rgba(40,25,18,0.30))] border border-[rgba(255,180,120,0.28)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.05),0_8px_16px_rgba(0,0,0,.25)]';
   const high =
-    'bg-[linear-gradient(145deg,rgba(255,145,60,0.20),rgba(110,60,30,0.22))] border border-orange-400/45 shadow-[0_0_18px_rgba(255,140,60,.35)]';
+    'bg-[linear-gradient(145deg,rgba(255,145,60,0.22),rgba(110,60,30,0.24))] border border-orange-400/50 shadow-[0_0_20px_rgba(255,140,60,.35)]';
 
   return (
     <div className={[base, highlight ? high : normal].join(' ')}>
       {/* หัวการ์ด */}
       <div
         className={[
-          'flex items-center gap-1 text-[11px] sm:text-xs leading-none',
+          'flex items-center gap-1 text-[11px] md:text-xs leading-none',
           highlight ? 'text-orange-200' : 'text-amber-200/80',
         ].join(' ')}
       >
@@ -134,16 +126,25 @@ function MoneyCard({
         <span className="truncate">{label}</span>
       </div>
 
-      {/* ตัวเลข — ปรับขนาดอัตโนมัติไม่ล้น/ไม่ตกขอบ */}
+      {/* ตัวเลข — ยืดหยุ่น ไม่ล้น/ไม่โดนตัด, คมชัดบน iOS */}
       <div
         className={[
-          'text-white font-extrabold tabular-nums leading-tight whitespace-nowrap',
-          // ปรับด้วย clamp: มือถือจะใหญ่ขึ้นตามความกว้าง, เดสก์ท็อปไม่เกินเพดาน
+          'text-white font-extrabold tabular-nums leading-tight',
+          'tracking-tight',
+          // ใช้ clamp ให้โตตามความกว้าง แต่มีเพดานไม่ล้น
           highlight
-            ? 'text-[clamp(24px,6vw,40px)] md:text-[clamp(28px,3.2vw,44px)]'
-            : 'text-[clamp(20px,5vw,32px)] md:text-[clamp(24px,2.8vw,36px)]',
+            ? 'text-[clamp(22px,6.2vw,40px)] md:text-[clamp(26px,2.8vw,44px)]'
+            : 'text-[clamp(20px,5.5vw,32px)] md:text-[clamp(22px,2.4vw,36px)]',
         ].join(' ')}
-        style={{ paddingRight: 2 }} // กันโดนขอบขวาตัด 1–2px
+        style={{
+          WebkitFontSmoothing: 'antialiased',
+          MozOsxFontSmoothing: 'grayscale',
+          // กันโดนขอบขวาตัด 1–2px (Safari)
+          paddingRight: 2,
+          // ถ้าพื้นหลังสว่างขึ้นในอนาคต เลขยังคมชัด
+          textShadow: '0 1px 2px rgba(0,0,0,.35)',
+          whiteSpace: 'nowrap',
+        }}
       >
         {value}
       </div>
@@ -151,17 +152,17 @@ function MoneyCard({
       {/* หน่วย */}
       <div
         className={[
-          'text-[10px] sm:text-[11px] md:text-xs leading-none',
-          highlight ? 'text-orange-200/80' : 'text-amber-200/70',
+          'text-[10px] md:text-xs leading-none',
+          highlight ? 'text-orange-200/85' : 'text-amber-200/70',
         ].join(' ')}
       >
         บาท
       </div>
 
-      {/* แสงเฉพาะ highlight */}
+      {/* แสงวูบวาบ: ปิดบนจอเล็ก เพื่อไม่ให้เป็น "จุดวงกลม" */}
       {highlight && (
         <span
-          className="pointer-events-none absolute inset-y-0 -left-24 w-28 bg-gradient-to-r from-transparent via-white/40 to-transparent blur-md"
+          className="pointer-events-none absolute inset-y-0 -left-24 md:-left-36 w-24 md:w-32 bg-gradient-to-r from-transparent via-white/50 to-transparent blur-md md:blur-lg hidden md:block"
           style={{ animation: 'shine 3.6s linear infinite' }}
         />
       )}
