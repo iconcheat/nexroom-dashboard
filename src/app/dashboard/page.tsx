@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Head from 'next/head';
 import Script from 'next/script';
 import BookingPanel from '../../components/BookingPanel';
@@ -27,6 +27,38 @@ export default function DashboardPage() {
   };
   const fmtTH = (n: number) =>
     (typeof n === 'number' ? n.toLocaleString('th-TH') : String(n ?? ''));
+
+    // === Audio autoplay unlock (ADD) ===
+  // ปลดล็อกนโยบาย autoplay ของเบราว์เซอร์: ให้ผู้ใช้คลิก/กดแป้นพิมพ์ครั้งแรก แล้วจึงอนุญาตเล่นเสียงอัตโนมัติ
+  const audioUnlockedRef = useRef(false);
+
+  useEffect(() => {
+    const unlock = () => {
+      if (audioUnlockedRef.current) return;
+      try {
+        const a = new Audio('/sounds/done.mp3'); // ใช้ไฟล์อะไรก็ได้ใน /public/sounds
+        a.muted = true;                          // ป้องกันเสียงดังตอนปลดล็อก
+        a.play().then(() => {
+          a.pause();
+          a.currentTime = 0;
+          a.muted = false;
+          console.log('🔓 Audio unlocked');
+        }).catch(() => {/* ignore */});
+      } finally {
+        audioUnlockedRef.current = true;
+        document.removeEventListener('click', unlock);
+        document.removeEventListener('keydown', unlock);
+      }
+    };
+
+    // ผู้ใช้กดครั้งแรก (คลิก/พิมพ์) → ปลดล็อก
+    document.addEventListener('click', unlock);
+    document.addEventListener('keydown', unlock);
+    return () => {
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('keydown', unlock);
+    };
+  }, []);
 
   // ===== Actions =====
   const handlePayCashNow = async () => {
