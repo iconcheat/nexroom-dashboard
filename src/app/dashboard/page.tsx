@@ -16,6 +16,15 @@ export default function DashboardPage() {
   const [billingPeriod, setBillingPeriod] = useState<string>('');
   const [roomsOverview, setRoomsOverview] = useState<any>(null);
   const CASH_WEBHOOK = '/api/payments/cash';
+  const playVoice = (type: 'processing' | 'done') => {
+    const src = type === 'processing' ? '/sounds/processing.mp3' : '/sounds/done.mp3';
+    const audio = new Audio(src);
+    audio.volume = 1.0;
+    audio.play().catch(() => {
+      // เบราว์เซอร์ต้องการ user gesture ครั้งแรกถึงจะเล่นอัตโนมัติได้
+      console.warn('Autoplay is blocked until user interacts');
+    });
+  };
   const fmtTH = (n: number) =>
     (typeof n === 'number' ? n.toLocaleString('th-TH') : String(n ?? ''));
 
@@ -75,6 +84,13 @@ export default function DashboardPage() {
         const data = msg.data || msg;
         if (!evt) return;
 
+            // ✨ ADD: voice from generic message channel
+        if (evt === 'notify') {
+          const tone = data?.tone;
+          if (tone === 'info')    playVoice('processing'); // เริ่มประมวลผล
+          if (tone === 'success') playVoice('done');       // เสร็จสิ้นแล้ว
+          return; // จบที่นี่ ไม่แตะ state อื่น
+        }
         if (evt === 'reserve_summary') setSummary(data);
         if (evt === 'payment_done') {
           setSummary((prev: any) => {
@@ -103,6 +119,16 @@ export default function DashboardPage() {
             prev?.booking_id === (data?.booking_id || prev?.booking_id);
           return same ? { ...prev, ...data } : prev;
         });
+      } catch {}
+    });
+
+    // ✨ ADD: named 'notify' event
+    es.addEventListener('notify', (ev: MessageEvent) => {
+      try {
+        const payload = JSON.parse(ev.data || '{}');
+        const tone = payload?.tone || payload?.data?.tone;
+        if (tone === 'info')    playVoice('processing');
+        if (tone === 'success') playVoice('done');
       } catch {}
     });
 
