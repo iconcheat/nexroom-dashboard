@@ -6,6 +6,7 @@ import Script from 'next/script';
 import BookingPanel from '../../components/BookingPanel';
 import AgentChat from '../../components/AgentChat';
 import RoomsOverviewPanel from '@/components/RoomsOverviewPanel';
+import QueueJobsPanel from '@/components/QueueJobsPanel';
 
 export default function DashboardPage() {
   // ===== State / Context =====
@@ -379,10 +380,8 @@ export default function DashboardPage() {
             </section>
 
             <section className="card col-8">
-              <div className="label">แนวโน้มรายได้ & ค้างชำระ (6 เดือน)</div>
-              <div style={{ height: 200 }}>
-                <canvas id="mainLine" />
-              </div>
+              <div className="label">📄 คิวงานล่าสุด</div>
+              <QueueJobsPanel className="rows-5 scroll-10 glass-neon neon-rounded" />
             </section>
 
             <section className="card col-4">
