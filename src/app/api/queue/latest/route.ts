@@ -9,36 +9,29 @@ export async function GET(req: NextRequest) {
 
   try {
     const url = new URL(req.url);
-    const limit = Math.min(
-      Math.max(parseInt(url.searchParams.get('limit') || '10', 10), 1),
-      50
-    );
+    const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '10', 10), 1), 50);
 
-    // 1) หา dorm_id (ลำดับความสำคัญ: query -> cookie 'dorm_id' -> map จาก nxr_session)
+    // ---- หา dorm_id: query -> cookie dorm_id -> map จาก nxr_session ----
     let dormId: string | null = url.searchParams.get('dorm_id');
 
     if (!dormId) {
-      // ลองดึงจาก cookie raw (ไม่ใช้ cookies() เพื่อเลี่ยง await/เวอร์ชัน)
       const raw = req.headers.get('cookie') || '';
       const m = raw.match(/(?:^|;\s*)dorm_id=([^;]+)/);
       if (m?.[1]) dormId = decodeURIComponent(m[1]);
     }
 
     if (!dormId) {
-      // ใช้ lib เดิม: extractSessionId เพื่ออ่าน nxr_session/session_id
       const sessionId = extractSessionId(req);
       if (sessionId) {
         const { rows } = await pool.query(
-          `
-          SELECT dorm_id
-          FROM app.staff_sessions
-          WHERE session_id = $1
-            AND deleted_at IS NULL
-            AND (expires_at IS NULL OR expires_at > now())
-          ORDER BY created_at DESC
-          LIMIT 1;
-          `,
-          [sessionId]
+          `SELECT dorm_id
+             FROM app.staff_sessions
+            WHERE session_id = $1
+              AND deleted_at IS NULL
+              AND (expires_at IS NULL OR expires_at > now())
+            ORDER BY created_at DESC
+            LIMIT 1`,
+          [sessionId],
         );
         dormId = rows[0]?.dorm_id ?? null;
       }
@@ -48,7 +41,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'missing_dorm_id' }, { status: 400 });
     }
 
-    // 2) ดึงคิวล่าสุดของหอ (done เท่านั้น)
+    // ---- ดึงคิวล่าสุดของหอ (done เท่านั้น) พร้อม room_id ----
+    // room_id มาจากคอลัมน์โดยตรง; เผื่อบาง job เก่าไม่มี room_id ให้ fallback จาก JSON
     const { rows } = await pool.query(
       `
       SELECT
@@ -59,16 +53,24 @@ export async function GET(req: NextRequest) {
         progress,
         result_url,
         COALESCE(result_json, '{}'::jsonb) AS result_json,
+        COALESCE(payload, '{}'::jsonb)     AS payload,
         error_message,
         created_at,
-        finished_at
+        finished_at,
+        -- room_id ตรงคอลัมน์; ถ้า NULL ลองเดาจาก json
+        COALESCE(
+          NULLIF(room_id, ''),
+          (result_json->>'room_no'),
+          (payload->>'room_no'),
+          (payload->'form_payload'->>'room_id')
+        ) AS room_id
       FROM app.queue_jobs
       WHERE dorm_id = $1
         AND status  = 'done'
       ORDER BY created_at DESC
-      LIMIT $2;
+      LIMIT $2
       `,
-      [dormId, limit]
+      [dormId, limit],
     );
 
     return NextResponse.json({ ok: true, dorm_id: dormId, items: rows });
