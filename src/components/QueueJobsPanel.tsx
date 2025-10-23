@@ -22,7 +22,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
     try {
       const r = await fetch('/api/queue/latest?limit=10', { cache: 'no-store' });
       const j = await r.json();
-      setItems(Array.isArray(j?.data) ? j.data : []);
+      setItems(Array.isArray(j?.data) ? j.data : Array.isArray(j?.items) ? j.items : []);
     } finally {
       setLoading(false);
     }
