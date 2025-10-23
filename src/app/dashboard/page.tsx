@@ -380,7 +380,6 @@ export default function DashboardPage() {
             </section>
 
             <section className="card col-4" style={{ maxWidth: 400 }}>
-              <div className="label">📄 คิวงานล่าสุด</div>
               <QueueJobsPanel className="glass-neon neon-rounded" />
             </section>
 

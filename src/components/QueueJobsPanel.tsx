@@ -38,7 +38,13 @@ function mapJobTitle(job: Job) {
   }
 }
 
-export default function QueueJobsPanel({ className = '' }: { className?: string }) {
+export default function QueueJobsPanel({
+  className = '',
+  showHeader = true,          // ✨ เพิ่ม prop คุมหัวข้อ
+}: {
+  className?: string;
+  showHeader?: boolean;
+}) {
   const [items, setItems] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -64,20 +70,25 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
 
   const data = useMemo(() => items, [items]);
 
+  // ✨ ใช้ค่าคงที่ + inline style เพื่อบังคับ "สูง = 3 แถว" จริง ๆ
+  const ROW_H = 56; // px
+  const GAP   = 8;  // px
+  const viewportHeight = ROW_H * 3 + GAP * 2;
+
   return (
     <div className={`nxr-queue ${className}`}>
-      <div className="header">🗂️ คิวงานล่าสุด</div>
+      {showHeader && <div className="header">🗂️ คิวงานล่าสุด</div>}
       {loading && <div className="hint">กำลังโหลด…</div>}
 
       {/* แสดง 3 แถวเป๊ะ + scrollbar ดูต่อได้ถึง 10 (ตาม limit) */}
-      <ul className="list viewport3">
+      <ul className="list viewport3" style={{ height: viewportHeight }}>
         {data.map((it) => {
           const title = mapJobTitle(it);
           const when  = fmtTime(it.finished_at || it.created_at);
           const room  = (it.room_id || '').trim();
 
           return (
-            <li key={it.job_id} className={`row s-${it.status}`}>
+            <li key={it.job_id} className={`row s-${it.status}`} style={{ minHeight: ROW_H }}>
               <div className="left">
                 <div className="line1">
                   {room && <span className="room">ห้อง {room}</span>}
@@ -102,20 +113,11 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
       </ul>
 
       <style jsx>{`
-        :root { --row-h: 54px; --gap: 8px; }
-
         .nxr-queue { display: flex; flex-direction: column; gap: 8px; max-width: 400px; }
         .header { font-weight: 700; margin-bottom: 2px; }
         .hint { font-size: 12px; opacity: .8; }
-
-        .list { display: flex; flex-direction: column; gap: var(--gap); }
-
-        /* ⚠️ คุมความสูงให้เท่ากับ "3 แถว + 2*gap" เสมอ และเปิด scrollbar */
-        .viewport3 {
-          height: calc(var(--row-h) * 3 + var(--gap) * 2);
-          overflow-y: auto;
-          padding-right: 4px;
-        }
+        .list { display: flex; flex-direction: column; gap: 8px; }
+        .viewport3 { overflow-y: auto; padding-right: 4px; }  /* ← ให้สกอร์บาร์ขึ้นที่นี่ */
 
         .row {
           box-sizing: border-box;
@@ -124,7 +126,6 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
           align-items: center;
           gap: 10px;
           padding: 8px 10px;
-          min-height: var(--row-h);
           border: 1px solid rgba(255,255,255,.10);
           background: rgba(30,30,48,.36);
           border-radius: 12px;
@@ -162,7 +163,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
         }
         .btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
 
-        /* เส้นขอบโทนส้มตามสถานะ */
+        /* โทนส้มตามสถานะ */
         .row.s-done    { border-color: rgba(255,153,0,.35); }
         .row.s-failed  { border-color: rgba(255,120,120,.35); }
         .row.s-running { border-color: rgba(255,176,32,.45); }
