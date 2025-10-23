@@ -10,7 +10,7 @@ type Job = {
   result_url: string | null;
   result_meta?: any;
   result_json?: any;
-  payload?: any;            // บาง API ส่ง payload กลับมา
+  payload?: any;
   room_id?: string | null;
   created_at: string;
   finished_at: string | null;
@@ -39,8 +39,12 @@ function mapJobTitle(job: Job) {
 }
 
 function getRoom(job: Job) {
+  // ลองเช็คตามลำดับที่แน่นอนว่า column ไหนมีค่าจริง
+  if (typeof job.room_id === 'string' && job.room_id.trim() !== '') {
+    return job.room_id; // ✅ ตรงจากคอลัมน์ room_id
+  }
+
   return (
-    job?.room_id ||
     job?.result_meta?.room_no ||
     job?.result_json?.room_no ||
     job?.payload?.room_no ||
@@ -73,16 +77,13 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
     return () => clearInterval(t);
   }, []);
 
-  // viewport แสดง 3 แถวเสมอ (แต่เลื่อนได้)
   const data = useMemo(() => items, [items]);
-
-  // --- DEBUG: ถ้าเลขห้องไม่ขึ้น ลองเปิดคอมเมนต์นี้ชั่วคราว ---
-  // useEffect(() => { if (data[0]) console.log('queue sample ->', data[0]); }, [data]);
 
   return (
     <div className={`nxr-queue ${className}`}>
       {loading && <div className="hint">กำลังโหลด…</div>}
 
+      {/* กล่องเดียว สูงเท่ากับ 3 แถวแน่ ๆ + สกอร์บาร์ */}
       <ul className="list viewport3">
         {data.map((it) => {
           const title = mapJobTitle(it);
@@ -115,15 +116,15 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
       </ul>
 
       <style jsx>{`
-        :root { --row-h: 56px; }
+        :root { --row-h: 54px; }
         .nxr-queue { display: flex; flex-direction: column; gap: 8px; }
         .hint { font-size: 12px; opacity: .8; }
 
-        /* กล่องเดียว + viewport สูงเท่า 3 แถว แล้วเลื่อนได้ */
+        /* พอดี 3 แถวเสมอ + สกอร์บาร์แน่ ๆ */
         .list { display: flex; flex-direction: column; gap: 8px; }
         .viewport3 {
-          max-height: calc(var(--row-h) * 3 + 16px); /* 3 แถว + ช่องว่างเล็กน้อย */
-          overflow: auto;
+          height: calc(var(--row-h) * 3 + 16px);  /* 3 แถว + ช่องว่าง */
+          overflow-y: auto;
           padding-right: 4px;
         }
 
@@ -135,7 +136,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
           padding: 8px 10px;
           min-height: var(--row-h);
           border: 1px solid rgba(255,255,255,.10);
-          background: rgba(30,30,48,.38);
+          background: rgba(30,30,48,.36);
           border-radius: 12px;
         }
         .left { min-width: 0; }
@@ -148,7 +149,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
         .title {
           font-weight: 700; color: #fff; font-size: 13px;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          max-width: 48vw;
+          max-width: 44vw;
         }
         .line2 { display: flex; gap: 8px; align-items: center; font-size: 11px; opacity: .9; }
         .badge {
@@ -157,7 +158,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
           text-transform: uppercase; letter-spacing: .3px;
         }
         .progress { opacity: .85; }
-        .time { opacity: .75; }
+        .time { opacity: .78; }
 
         .actions { display: flex; align-items: center; }
         .btn {
@@ -168,7 +169,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
         }
         .btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
 
-        /* สีตามสถานะโทนส้ม */
+        /* โทนส้ม */
         .row.s-done    { border-color: rgba(255,153,0,.35); }
         .row.s-failed  { border-color: rgba(255,120,120,.35); }
         .row.s-running { border-color: rgba(255,176,32,.45); }

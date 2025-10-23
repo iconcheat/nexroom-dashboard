@@ -379,9 +379,9 @@ export default function DashboardPage() {
               <canvas id="sparkTickets" />
             </section>
 
-            <section className="card col-8">
+            <section className="card col-8" style={{ maxWidth: 620 }}>
               <div className="label">📄 คิวงานล่าสุด</div>
-               <QueueJobsPanel className="glass-neon neon-rounded" />
+              <QueueJobsPanel className="glass-neon neon-rounded" />
             </section>
 
 
