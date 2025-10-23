@@ -28,11 +28,11 @@ function mapJobTitle(job: Job) {
   if (job?.title && job.title.trim()) return job.title.trim();
   const jt = (job?.job_type || '').toLowerCase();
   switch (jt) {
-    case 'reserve': return 'จองห้องพัก';
-    case 'issue_receipt': return 'ออกใบเสร็จ';
-    case 'issue_invoice': return 'ออกใบแจ้งหนี้';
-    case 'export_pdf': return 'ส่งออกไฟล์ PDF';
-    default: return jt || 'งานระบบ';
+    case 'reserve':        return 'จองห้องพัก';
+    case 'issue_receipt':  return 'ออกใบเสร็จ';
+    case 'issue_invoice':  return 'ออกใบแจ้งหนี้';
+    case 'export_pdf':     return 'ส่งออกไฟล์ PDF';
+    default:               return jt || 'งานระบบ';
   }
 }
 
@@ -67,21 +67,16 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
     return () => clearInterval(t);
   }, []);
 
-  // 5 แถวแรกที่โชว์ในบล็อก
-  const top5 = useMemo(() => items.slice(0, 5), [items]);
+  // โชว์ 3 แถวแรกในบล็อกหลัก
+  const top3 = useMemo(() => items.slice(0, 3), [items]);
 
   return (
     <div className={`nxr-queue ${className}`}>
-      <div className="head">
-        <span className="icon">📄</span>
-        <span className="txt">คิวงานล่าสุด</span>
-      </div>
-
       {loading && <div className="hint">กำลังโหลด…</div>}
 
-      {/* บล็อกหลัก: โชว์ 5 แถว */}
+      {/* บล็อกหลัก: โชว์ 3 แถว (กะทัดรัด) */}
       <ul className="list compact">
-        {top5.map((it) => {
+        {top3.map((it) => {
           const title = mapJobTitle(it);
           const room  = getRoom(it);
           const when  = fmtTimeShort(it.finished_at || it.created_at);
@@ -157,13 +152,11 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
 
       <style jsx>{`
         .nxr-queue { display: flex; flex-direction: column; gap: 10px; }
-        .head { display: flex; align-items: center; gap: 8px; font-weight: 700; opacity: .9; }
-        .head .icon { filter: grayscale(.2); }
         .hint { font-size: 12px; opacity: .8; }
 
         /* รายการ */
         .list { display: flex; flex-direction: column; gap: 8px; }
-        .list.compact { max-height: 220px; overflow: hidden; } /* ~5 แถว */
+        .list.compact { max-height: 3 * 56px; overflow: hidden; } /* ~3 แถว */
         .scrollWrap { max-height: 260px; overflow: auto; padding-right: 4px; border-top: 1px dashed rgba(255,255,255,.08); padding-top: 6px; }
 
         .row {
@@ -173,15 +166,15 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
           gap: 10px;
           padding: 8px 10px;
           border: 1px solid rgba(255,255,255,.10);
-          background: rgba(30,30,48,.42);
-          border-radius: 10px;
+          background: rgba(30,30,48,.38);
+          border-radius: 12px;
         }
         .left { min-width: 0; }
         .line1 { display: flex; align-items: center; gap: 8px; }
         .room {
-          font-size: 12px; font-weight: 800; color: #ffd166;
+          font-size: 12px; font-weight: 800; color: #ffb347;             /* ส้ม */
           padding: 1px 8px; border-radius: 999px;
-          background: rgba(255,209,102,.12); border: 1px solid rgba(255,209,102,.25);
+          background: rgba(255,180,71,.12); border: 1px solid rgba(255,180,71,.35);
         }
         .title {
           font-weight: 700; color: #fff; font-size: 13px;
@@ -198,15 +191,16 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
         .actions { display: flex; align-items: center; }
         .btn {
           font-weight: 800; font-size: 12px; padding: 6px 10px; border-radius: 10px;
-          background: linear-gradient(100deg,#7aafff,#6af0c6); color: #0b1020; text-decoration: none;
+          background: linear-gradient(100deg,#ffb347,#ffd166);           /* ปุ่มโทนส้ม */
+          color: #0b1020; text-decoration: none;
           transition: transform .12s ease, filter .12s ease;
         }
         .btn:hover { transform: translateY(-1px); filter: brightness(1.03); }
 
-        /* สีตามสถานะ */
-        .row.s-done    { border-color: rgba(33,208,122,.35); }
+        /* สีตามสถานะ — ปรับเป็นโทนส้ม */
+        .row.s-done    { border-color: rgba(255,153,0,.35); }
         .row.s-failed  { border-color: rgba(255,120,120,.35); }
-        .row.s-running { border-color: rgba(255,176,32,.35); }
+        .row.s-running { border-color: rgba(255,176,32,.45); }
       `}</style>
     </div>
   );
