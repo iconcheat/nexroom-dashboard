@@ -16,7 +16,6 @@ type Job = {
   finished_at: string | null;
 };
 
-// dd/MM HH:mm (เพิ่มวันที่ตามที่ขอ)
 function fmtTime(iso?: string | null) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -59,7 +58,7 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 30_000); // refresh ทุก 30s
+    const t = setInterval(load, 30000);
     return () => clearInterval(t);
   }, []);
 
@@ -70,12 +69,12 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
       <div className="header">🗂️ คิวงานล่าสุด</div>
       {loading && <div className="hint">กำลังโหลด…</div>}
 
-      {/* list เดียว คุมความสูง = 3 แถว + overflow */}
+      {/* แสดง 3 แถวเป๊ะ + scrollbar ดูต่อได้ถึง 10 (ตาม limit) */}
       <ul className="list viewport3">
         {data.map((it) => {
           const title = mapJobTitle(it);
           const when  = fmtTime(it.finished_at || it.created_at);
-          const room  = (it.room_id || '').trim(); // ได้มาจาก API แล้ว
+          const room  = (it.room_id || '').trim();
 
           return (
             <li key={it.job_id} className={`row s-${it.status}`}>
@@ -103,22 +102,23 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
       </ul>
 
       <style jsx>{`
-        :root { --row-h: 54px; }
+        :root { --row-h: 54px; --gap: 8px; }
 
-        .nxr-queue { display: flex; flex-direction: column; gap: 8px; max-width: 820px; margin: 0 auto; }
+        .nxr-queue { display: flex; flex-direction: column; gap: 8px; max-width: 400px; }
         .header { font-weight: 700; margin-bottom: 2px; }
         .hint { font-size: 12px; opacity: .8; }
 
-        .list { display: flex; flex-direction: column; gap: 8px; }
+        .list { display: flex; flex-direction: column; gap: var(--gap); }
 
-        /* โชว์ 3 แถวเป๊ะ แล้วเลื่อนดูได้ */
+        /* ⚠️ คุมความสูงให้เท่ากับ "3 แถว + 2*gap" เสมอ และเปิด scrollbar */
         .viewport3 {
-          height: calc(var(--row-h) * 3 + 16px); /* 3 แถว + ช่องว่างระหว่างแถว (2*8px) */
+          height: calc(var(--row-h) * 3 + var(--gap) * 2);
           overflow-y: auto;
           padding-right: 4px;
         }
 
         .row {
+          box-sizing: border-box;
           display: grid;
           grid-template-columns: 1fr auto;
           align-items: center;
@@ -136,12 +136,14 @@ export default function QueueJobsPanel({ className = '' }: { className?: string 
           font-size: 12px; font-weight: 800; color: #ffb347;
           padding: 1px 8px; border-radius: 999px;
           background: rgba(255,180,71,.12); border: 1px solid rgba(255,180,71,.35);
+          white-space: nowrap;
         }
         .title {
           font-weight: 700; color: #fff; font-size: 13px;
           white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-          max-width: 44vw;
+          max-width: 42vw;
         }
+
         .line2 { display: flex; gap: 8px; align-items: center; font-size: 11px; opacity: .9; }
         .badge {
           padding: 1px 8px; border-radius: 999px;
