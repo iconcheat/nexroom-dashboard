@@ -381,8 +381,9 @@ export default function DashboardPage() {
 
             <section className="card col-8">
               <div className="label">📄 คิวงานล่าสุด</div>
-              <QueueJobsPanel className="rows-5 scroll-10 glass-neon neon-rounded" />
+               <QueueJobsPanel className="glass-neon neon-rounded" />
             </section>
+
 
             <section className="card col-4">
               <div className="label">วงแหวนอัตราเข้าพัก</div>
