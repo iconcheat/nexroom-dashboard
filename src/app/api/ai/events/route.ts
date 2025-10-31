@@ -8,20 +8,53 @@ export const runtime = 'nodejs';
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const fromQuery = url.searchParams.get('session_id');
-  const dormId   = url.searchParams.get('dorm_id') || '';
-  const sid      = fromQuery || extractSessionId(req);
+  const dormId = url.searchParams.get('dorm_id') || '';
+  const sid = fromQuery || extractSessionId(req);
 
   if (!sid) return new Response('missing session', { status: 401 });
 
   const stream = new ReadableStream({
     async start(controller) {
       const enc = new TextEncoder();
-      const write = (s: string) => controller.enqueue(enc.encode(s));
+      let closed = false;
+      let ping: NodeJS.Timeout | null = null;
 
-      // เปิดสตรีม
-      write(`event: open\ndata: ${JSON.stringify({ ok: true })}\n\n`);
+      // ---- cleanup รวมศูนย์ ----
+      let unsubSession: (() => void) | null = null;
+      let unsubDorm: (() => void) | null = null;
+      const cleanup = () => {
+        if (closed) return;
+        closed = true;
+        try { if (ping) clearInterval(ping); } catch {}
+        try { unsubSession?.(); } catch {}
+        try { unsubDorm?.(); } catch {}
+        try { controller.close(); } catch {}
+      };
 
-      // --- replay (ล่าสุดก่อน) ---
+      // ---- เขียนแบบปลอดภัย ----
+      const safeWrite = (s: string) => {
+        if (closed) return;
+        try {
+          controller.enqueue(enc.encode(s));
+        } catch {
+          // ถ้าช่องปิดไปแล้วให้ปิดงานเงียบ ๆ
+          cleanup();
+        }
+      };
+
+      // helper: ส่ง event ในรูปแบบ SSE มาตรฐาน
+      const emit = (event: string, data: any) => {
+        safeWrite(`event: ${event}\n`);
+        safeWrite(
+          `data: ${typeof data === 'string' ? data : JSON.stringify(data)}\n\n`
+        );
+      };
+
+      // ---- เปิดสตรีม + (option) นโยบาย reconnect ของ browser ----
+      emit('open', { ok: true });
+      // safeWrite('retry: 15000\n\n'); // ถ้าต้องการให้ browser reconnect ทุก 15s (คง logic เดิมไว้ จึงคอมเมนต์)
+
+      // ---- replay (ล่าสุดก่อน) ----
       try {
         const pool = getPool();
         const rs = await pool.query(
@@ -33,30 +66,34 @@ export async function GET(req: NextRequest) {
           [sid]
         );
         for (const r of rs.rows) {
-          write(`event: ${r.topic}\n` + `data: ${JSON.stringify(r.payload)}\n\n`);
+          emit(r.topic, r.payload);
         }
       } catch (e) {
         console.error('[SSE] replay error', e);
       }
 
-      // subscribe: session เสมอ
-      const unsubSession = sseSubscribe(sid, { id: sid, write, close: () => controller.close() });
+      // ---- subscribe: session เสมอ ----
+      unsubSession = sseSubscribe(sid, {
+        id: sid,
+        // publisher ฝั่ง bus อาจส่งสตริงที่ฟอร์แมต SSE มาอยู่แล้ว → เขียนทิ้งดิบ ๆ ได้
+        write: (s: string) => safeWrite(s),
+        close: cleanup,
+      });
 
-      // subscribe: dorm ถ้ามี
-      let unsubDorm: (() => void) | null = null;
+      // ---- subscribe: dorm ถ้ามี ----
       if (dormId && dormId !== sid) {
-        unsubDorm = sseSubscribe(dormId, { id: dormId, write, close: () => controller.close() });
+        unsubDorm = sseSubscribe(dormId, {
+          id: dormId,
+          write: (s: string) => safeWrite(s),
+          close: cleanup,
+        });
       }
 
-      // keep-alive
-      const ping = setInterval(() => write(`event: ping\ndata: {}\n\n`), 25_000);
+      // ---- keep-alive ----
+      ping = setInterval(() => emit('ping', {}), 25_000);
 
-      (req as any).signal?.addEventListener?.('abort', () => {
-        clearInterval(ping);
-        try { unsubSession(); } catch {}
-        try { unsubDorm?.(); } catch {}
-        controller.close();
-      });
+      // ---- เมื่อ client ปิดการเชื่อมต่อ ----
+      (req as any).signal?.addEventListener?.('abort', cleanup);
     },
   });
 
